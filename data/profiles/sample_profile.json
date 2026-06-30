@@ -1,0 +1,28 @@
+{
+    "personal_info": {
+      "name": "Aashutosh",
+      "links": {"github": "", "linkedin": ""}
+    },
+    "career_identity": {
+      "target_roles": ["Operations Manager"],
+      "industries": ["Education", "AI"],
+      "career_level": "Mid-Senior",
+      "years_experience": "5",
+      "work_authorization": "UAE Resident",
+      "preferred_locations": ["UAE"]
+    },
+    "experience": {
+      "work_history": [{"role": "Administrator"}],
+      "projects": [{"name": "AI Career Platform"}]
+    },
+    "education": {
+      "degrees": [{"level": "MBA"}]
+    },
+    "writing_style": {
+      "tone": "Professional",
+      "preferred_vocabulary": ["Efficiency", "Strategy"]
+    },
+    "ats_metadata": {
+      "last_updated": "2026-06-30"
+    }
+  }

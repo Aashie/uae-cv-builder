@@ -1,0 +1,19 @@
+{
+    "personal": {
+        "name": "",
+        "email": "",
+        "phone": "",
+        "nationality": "",
+        "visa_status": "",
+        "uae_driving_license": null
+    },
+    "preferences": {
+        "willing_to_relocate_emirate": [],
+        "notice_period_days": null
+    },
+    "education": [],
+    "experience": [],
+    "projects": [],
+    "skills": [],
+    "certifications": []
+}

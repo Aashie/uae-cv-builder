@@ -1,0 +1,12 @@
+{
+    "type": "object",
+    "properties": {
+      "personal_info": { "type": "object" },
+      "career_identity": { "type": "object" },
+      "experience": { "type": "object" },
+      "education": { "type": "object" },
+      "writing_style": { "type": "object" },
+      "ats_metadata": { "type": "object" }
+    },
+    "required": ["personal_info", "career_identity"]
+  }
