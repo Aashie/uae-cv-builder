@@ -3,3 +3,4 @@ google-generativeai
 sentence-transformers
 pytest
 python-dotenv
+python-docx
