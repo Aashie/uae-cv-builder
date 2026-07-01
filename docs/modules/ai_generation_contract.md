@@ -264,6 +264,26 @@ A structurally invalid response never reaches evidence tracing.
 
 ---
 
+## Search Grounding Boundary
+
+Search Grounding applies only to market-context outputs:
+
+- UAE job trends
+- salary insights
+- industry demand
+- hiring trend summaries
+
+Search Grounding is never applied to candidate-data generation:
+
+- professional summaries
+- experience bullets
+- skills
+- credentials
+- achievements
+- resume claims
+
+---
+
 ## Success Criteria
 
 - No invented credentials
