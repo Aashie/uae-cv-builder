@@ -8,11 +8,13 @@ Coordinate the completed resume analysis engines into a single output package.
 from engine.ai_response_validator import validate_ai_response
 from engine.career_insights_engine import analyze_career_insights
 from engine.evidence_extractor import extract_evidence
+from engine.experience_bullet_generator import generate_experience_bullets
 from engine.hallucination_checker import check_hallucinations
 from engine.matcher import match_job_to_profile
 from engine.professional_summary_generator import generate_professional_summary
 from engine.prompt_builder import build_prompt_package
 from engine.recommendation_engine import generate_recommendations
+from engine.resume_output_assembler import assemble_resume_output
 from engine.resume_draft_builder import build_resume_draft
 from engine.scorer import calculate_match_score
 from engine.skill_gap_analyzer import analyze_skill_gaps
@@ -62,6 +64,47 @@ def _default_hallucination_check() -> dict:
     }
 
 
+def _default_experience_bullet_validation() -> dict:
+    """Return the default experience bullet validation output."""
+    return {
+        "is_valid": False,
+        "errors": [],
+    }
+
+
+def _empty_ai_output() -> dict:
+    """Return an empty AI Generation Contract output."""
+    return {
+        "summary": "",
+        "experience_bullets": [],
+        "skills": {
+            "technical": [],
+            "soft": [],
+            "domain": [],
+        },
+    }
+
+
+def _empty_experience_bullet_output() -> dict:
+    """Return an empty deterministic experience bullet output wrapper."""
+    return {
+        "status": "success",
+        "errors": [],
+        "provider": "gemini",
+        "mode": "deterministic",
+        "ai_output": _empty_ai_output(),
+    }
+
+
+def _default_resume_output() -> dict:
+    """Return the default resume output assembler wrapper."""
+    return {
+        "status": "",
+        "errors": [],
+        "final_resume": {},
+    }
+
+
 def _default_output() -> dict:
     """Return the full orchestrator output schema with default values."""
     return {
@@ -80,7 +123,11 @@ def _default_output() -> dict:
         "resume_draft": {},
         "summary": "",
         "ai_validation": _default_ai_validation(),
+        "experience_bullet_output": {},
+        "experience_bullet_validation": _default_experience_bullet_validation(),
         "hallucination_check": _default_hallucination_check(),
+        "resume_output": _default_resume_output(),
+        "final_resume": {},
     }
 
 
@@ -133,6 +180,18 @@ def _ai_output_from_resume_draft(resume_draft: dict) -> dict:
             "domain": [],
         },
     }
+
+
+def _replace_experience_bullets(
+    experience_bullet_output: dict,
+    bullets: list[dict],
+) -> dict:
+    """Replace experience bullets in a wrapper with approved bullets only."""
+    if not experience_bullet_output:
+        experience_bullet_output = _empty_experience_bullet_output()
+    experience_bullet_output.setdefault("ai_output", _empty_ai_output())
+    experience_bullet_output["ai_output"]["experience_bullets"] = bullets
+    return experience_bullet_output
 
 
 def _set_status(output: dict) -> None:
@@ -206,16 +265,68 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
             output["errors"].append(f"Professional summary generation failed: {error}")
 
         ai_validation = validate_ai_response(ai_output)
+        professional_summary_output_for_assembler = ai_output
+        if not ai_validation["is_valid"]:
+            output["errors"].append(
+                f"Professional summary validation failed: {ai_validation['errors']}"
+            )
+            professional_summary_output_for_assembler = _empty_ai_output()
+
+        try:
+            experience_bullet_output = generate_experience_bullets(evidence_items)
+        except Exception:
+            experience_bullet_output = _empty_experience_bullet_output()
+            output["errors"].append("Experience bullet generation failed.")
+
+        if experience_bullet_output.get("status") == "failed":
+            output["errors"].append("Experience bullet generation failed.")
+            experience_bullet_output = _replace_experience_bullets(
+                experience_bullet_output,
+                [],
+            )
+
+        experience_bullet_validation = _default_experience_bullet_validation()
         hallucination_check = _default_hallucination_check()
 
-        if not ai_validation["is_valid"]:
-            output["errors"].append(f"AI validation failed: {ai_validation['errors']}")
-        else:
-            hallucination_check = check_hallucinations(ai_output, evidence_items)
+        if experience_bullet_output.get("status") != "failed":
+            experience_bullet_validation = validate_ai_response(
+                experience_bullet_output.get("ai_output", _empty_ai_output()),
+                context="experience_bullets",
+            )
+
+            if not experience_bullet_validation["is_valid"]:
+                output["errors"].append(
+                    "Experience bullet validation failed: "
+                    f"{experience_bullet_validation['errors']}"
+                )
+                experience_bullet_output = _replace_experience_bullets(
+                    experience_bullet_output,
+                    [],
+                )
+            else:
+                hallucination_check = check_hallucinations(
+                    experience_bullet_output["ai_output"],
+                    evidence_items,
+                )
             if hallucination_check["hallucination_count"] > 0:
                 output["errors"].append(
                     "Hallucination checker removed unsupported bullets."
                 )
+                experience_bullet_output = _replace_experience_bullets(
+                    experience_bullet_output,
+                    hallucination_check["passed_bullets"],
+                )
+
+        resume_output = assemble_resume_output(
+            resume_draft,
+            professional_summary_output_for_assembler,
+            experience_bullet_output,
+        )
+        if resume_output.get("status") == "partial":
+            output["errors"].append("Resume output assembly returned partial status.")
+            output["errors"].extend(resume_output.get("errors", []))
+        elif resume_output.get("status") == "failed":
+            output["errors"].append("Resume output assembly failed.")
 
     except Exception as error:
         output = _default_output()
@@ -245,7 +356,11 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
     output["resume_draft"] = resume_draft
     output["summary"] = ai_output.get("summary", "")
     output["ai_validation"] = ai_validation
+    output["experience_bullet_output"] = experience_bullet_output
+    output["experience_bullet_validation"] = experience_bullet_validation
     output["hallucination_check"] = hallucination_check
+    output["resume_output"] = resume_output
+    output["final_resume"] = resume_output.get("final_resume", {})
     _set_status(output)
 
     return output
