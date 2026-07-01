@@ -215,3 +215,80 @@ def test_multiple_validation_errors_returned_in_single_pass() -> None:
         "Missing required field: skills.soft",
         "Missing required field: skills.domain",
     ]
+
+
+def experience_bullets_response() -> dict:
+    """Return a valid experience bullet generation response fixture."""
+    return {
+        "summary": "",
+        "experience_bullets": [
+            {
+                "text": "Coordinated reporting workflows.",
+                "source_evidence_id": "EXP001",
+            }
+        ],
+        "skills": {
+            "technical": [],
+            "soft": [],
+            "domain": [],
+        },
+    }
+
+
+def test_experience_bullets_context_accepts_empty_summary() -> None:
+    result = validate_ai_response(
+        experience_bullets_response(),
+        context="experience_bullets",
+    )
+
+    assert result == {"is_valid": True, "errors": []}
+
+
+def test_default_context_still_rejects_empty_summary() -> None:
+    result = validate_ai_response(experience_bullets_response())
+
+    assert result["is_valid"] is False
+    assert "Empty required field: summary" in result["errors"]
+
+
+def test_experience_bullets_context_still_requires_summary_key() -> None:
+    response = experience_bullets_response()
+    response.pop("summary")
+
+    result = validate_ai_response(response, context="experience_bullets")
+
+    assert result["is_valid"] is False
+    assert "Missing required field: summary" in result["errors"]
+
+
+def test_experience_bullets_context_rejects_unsupported_top_level_field() -> None:
+    response = experience_bullets_response()
+    response["extra"] = "unsupported"
+
+    result = validate_ai_response(response, context="experience_bullets")
+
+    assert result["is_valid"] is False
+    assert "Unsupported field: extra" in result["errors"]
+
+
+def test_experience_bullets_context_rejects_invalid_bullet_structure() -> None:
+    response = experience_bullets_response()
+    response["experience_bullets"] = [{"text": "", "source_evidence_id": ""}]
+
+    result = validate_ai_response(response, context="experience_bullets")
+
+    assert result["is_valid"] is False
+    assert "Empty required field: text in bullet at index 0" in result["errors"]
+    assert (
+        "Empty required field: source_evidence_id in bullet at index 0"
+        in result["errors"]
+    )
+
+
+def test_experience_bullets_context_accepts_empty_skill_lists() -> None:
+    result = validate_ai_response(
+        experience_bullets_response(),
+        context="experience_bullets",
+    )
+
+    assert result["is_valid"] is True

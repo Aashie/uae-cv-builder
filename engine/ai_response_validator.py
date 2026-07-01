@@ -16,7 +16,7 @@ def _is_empty_string(value: object) -> bool:
     return isinstance(value, str) and not value.strip()
 
 
-def validate_ai_response(response: dict) -> dict:
+def validate_ai_response(response: dict, context: str = "full_resume") -> dict:
     """Validate an AI response structure and collect all contract errors."""
     errors: list[str] = []
 
@@ -32,7 +32,7 @@ def validate_ai_response(response: dict) -> dict:
         summary = response["summary"]
         if not isinstance(summary, str):
             errors.append("Invalid type for summary: expected str")
-        elif _is_empty_string(summary):
+        elif context == "full_resume" and _is_empty_string(summary):
             errors.append("Empty required field: summary")
 
     if "experience_bullets" in response:
