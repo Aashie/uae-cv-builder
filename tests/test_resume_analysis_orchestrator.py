@@ -264,6 +264,7 @@ def test_output_schema_contains_required_top_level_fields() -> None:
         "readiness_tier",
         "career_insights",
         "resume_draft",
+        "skills_section_output",
         "summary",
         "ai_validation",
         "experience_bullet_output",
@@ -340,8 +341,20 @@ def test_orchestrator_runs_hallucination_checker_after_bullet_validation(monkeyp
 def test_orchestrator_calls_resume_output_assembler(monkeypatch) -> None:
     calls = []
 
-    def fake_assembler(resume_draft, professional_summary_output, experience_bullet_output):
-        calls.append((resume_draft, professional_summary_output, experience_bullet_output))
+    def fake_assembler(
+        resume_draft,
+        professional_summary_output,
+        experience_bullet_output,
+        skills_section_output=None,
+    ):
+        calls.append(
+            (
+                resume_draft,
+                professional_summary_output,
+                experience_bullet_output,
+                skills_section_output,
+            )
+        )
         return {
             "status": "success",
             "errors": [],
@@ -375,10 +388,218 @@ def test_resume_output_exists() -> None:
     assert result["resume_output"]["status"] == "success"
 
 
+def test_skills_section_output_exists() -> None:
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert "skills_section_output" in result
+    assert result["skills_section_output"]["status"] == "success"
+
+
 def test_final_resume_exists() -> None:
     result = orchestrator.run_resume_analysis(make_profile(), make_job())
 
     assert result["final_resume"] == result["resume_output"]["final_resume"]
+
+
+def test_successful_pipeline_includes_structured_final_resume_skills() -> None:
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert set(result["final_resume"]["skills"]) == {
+        "technical",
+        "soft",
+        "tools",
+        "domain",
+        "matched_skills",
+        "strongest_skills",
+    }
+
+
+def test_orchestrator_calls_skills_section_generator(monkeypatch) -> None:
+    calls = []
+
+    def fake_skills_generator(resume_draft, matcher_output, career_insights):
+        calls.append((resume_draft, matcher_output, career_insights))
+        return {
+            "status": "success",
+            "errors": [],
+            "skills_section": {
+                "technical": ["Excel"],
+                "soft": [],
+                "tools": [],
+                "domain": [],
+                "matched_skills": ["Excel"],
+                "strongest_skills": [],
+            },
+        }
+
+    monkeypatch.setattr(orchestrator, "generate_skills_section", fake_skills_generator)
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert len(calls) == 1
+    resume_draft, matcher_output, career_insights = calls[0]
+    assert resume_draft == result["resume_draft"]
+    assert matcher_output["matched_skills"] == ["Excel"]
+    assert career_insights == result["career_insights"]
+
+
+def test_orchestrator_passes_skills_section_output_to_assembler(monkeypatch) -> None:
+    captured = {}
+    skills_output = {
+        "status": "success",
+        "errors": [],
+        "skills_section": {
+            "technical": ["Excel"],
+            "soft": [],
+            "tools": [],
+            "domain": [],
+            "matched_skills": ["Excel"],
+            "strongest_skills": [],
+        },
+    }
+
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_skills_section",
+        lambda resume_draft, matcher_output, career_insights: skills_output,
+    )
+
+    def capture_assembler(
+        resume_draft,
+        professional_summary_output,
+        experience_bullet_output,
+        skills_section_output=None,
+    ):
+        captured["skills_section_output"] = skills_section_output
+        return {
+            "status": "success",
+            "errors": [],
+            "final_resume": {"skills": skills_section_output["skills_section"]},
+        }
+
+    monkeypatch.setattr(orchestrator, "assemble_resume_output", capture_assembler)
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert captured["skills_section_output"] == skills_output
+    assert result["skills_section_output"] == skills_output
+
+
+def test_skills_section_failed_status_marks_orchestrator_partial(monkeypatch) -> None:
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_skills_section",
+        lambda resume_draft, matcher_output, career_insights: {
+            "status": "failed",
+            "errors": ["no skills"],
+            "skills_section": {},
+        },
+    )
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "partial"
+    assert "Skills section generation failed." in result["errors"]
+    assert result["final_resume"]["metadata"]["skills_source"] == "resume_draft_fallback"
+
+
+def test_skills_section_partial_status_marks_orchestrator_partial(monkeypatch) -> None:
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_skills_section",
+        lambda resume_draft, matcher_output, career_insights: {
+            "status": "partial",
+            "errors": ["reference warning"],
+            "skills_section": {
+                "technical": ["Excel"],
+                "soft": [],
+                "tools": [],
+                "domain": [],
+                "matched_skills": ["Excel"],
+                "strongest_skills": [],
+            },
+        },
+    )
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "partial"
+    assert "Skills section generation returned partial status." in result["errors"]
+    assert result["final_resume"]["metadata"]["skills_source"] == "skills_section_generator"
+
+
+def test_skills_section_generator_exception_marks_orchestrator_partial(monkeypatch) -> None:
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_skills_section",
+        lambda resume_draft, matcher_output, career_insights: (
+            _ for _ in ()
+        ).throw(RuntimeError("boom")),
+    )
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "partial"
+    assert "Skills section generation failed." in result["errors"]
+    assert result["skills_section_output"]["status"] == "failed"
+
+
+def test_skills_section_failure_does_not_stop_summary_bullets_or_assembler(monkeypatch) -> None:
+    events = []
+
+    monkeypatch.setattr(
+        orchestrator,
+        "generate_skills_section",
+        lambda resume_draft, matcher_output, career_insights: {
+            "status": "failed",
+            "errors": ["no skills"],
+            "skills_section": {},
+        },
+    )
+
+    def track_summary(prompt_package, resume_draft):
+        events.append("summary")
+        return {
+            "summary": "Generated summary.",
+            "experience_bullets": [],
+            "skills": {"technical": [], "soft": [], "domain": []},
+        }
+
+    def track_bullets(evidence_items):
+        events.append("bullets")
+        return {
+            "status": "success",
+            "errors": [],
+            "provider": "gemini",
+            "mode": "deterministic",
+            "ai_output": {
+                "summary": "",
+                "experience_bullets": [],
+                "skills": {"technical": [], "soft": [], "domain": []},
+            },
+        }
+
+    def track_assembler(
+        resume_draft,
+        professional_summary_output,
+        experience_bullet_output,
+        skills_section_output=None,
+    ):
+        events.append("assembler")
+        return {
+            "status": "success",
+            "errors": [],
+            "final_resume": {"metadata": {"skills_source": "resume_draft_fallback"}},
+        }
+
+    monkeypatch.setattr(orchestrator, "generate_professional_summary", track_summary)
+    monkeypatch.setattr(orchestrator, "generate_experience_bullets", track_bullets)
+    monkeypatch.setattr(orchestrator, "assemble_resume_output", track_assembler)
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "partial"
+    assert events == ["summary", "bullets", "assembler"]
 
 
 def test_experience_bullet_generator_failure_marks_partial(monkeypatch) -> None:
@@ -435,7 +656,12 @@ def test_hallucination_failure_passes_only_passed_bullets_to_assembler(monkeypat
         },
     )
 
-    def capture_assembler(resume_draft, professional_summary_output, experience_bullet_output):
+    def capture_assembler(
+        resume_draft,
+        professional_summary_output,
+        experience_bullet_output,
+        skills_section_output=None,
+    ):
         captured["bullets"] = experience_bullet_output["ai_output"]["experience_bullets"]
         return {
             "status": "success",
@@ -463,7 +689,12 @@ def test_all_hallucinated_bullets_results_in_empty_bullets(monkeypatch) -> None:
         },
     )
 
-    def capture_assembler(resume_draft, professional_summary_output, experience_bullet_output):
+    def capture_assembler(
+        resume_draft,
+        professional_summary_output,
+        experience_bullet_output,
+        skills_section_output=None,
+    ):
         captured["bullets"] = experience_bullet_output["ai_output"]["experience_bullets"]
         return {
             "status": "success",
@@ -483,7 +714,7 @@ def test_assembler_partial_status_marks_orchestrator_partial(monkeypatch) -> Non
     monkeypatch.setattr(
         orchestrator,
         "assemble_resume_output",
-        lambda resume_draft, summary_output, bullet_output: {
+        lambda resume_draft, summary_output, bullet_output, skills_output=None: {
             "status": "partial",
             "errors": ["assembler warning"],
             "final_resume": {},
@@ -501,7 +732,7 @@ def test_assembler_failed_status_marks_orchestrator_partial(monkeypatch) -> None
     monkeypatch.setattr(
         orchestrator,
         "assemble_resume_output",
-        lambda resume_draft, summary_output, bullet_output: {
+        lambda resume_draft, summary_output, bullet_output, skills_output=None: {
             "status": "failed",
             "errors": ["assembler failed"],
             "final_resume": {},

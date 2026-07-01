@@ -56,16 +56,34 @@ def experience_bullet_output(
     }
 
 
+def skills_section_output(status: str = "success") -> dict:
+    """Return a skills section output fixture."""
+    return {
+        "status": status,
+        "errors": [],
+        "skills_section": {
+            "technical": ["Microsoft Excel"],
+            "soft": ["Leadership"],
+            "tools": ["CRM"],
+            "domain": ["Operations"],
+            "matched_skills": ["Excel"],
+            "strongest_skills": ["Reporting"],
+        },
+    }
+
+
 def assembled_result(
     draft: dict | None = None,
     summary_output: dict | None = None,
     bullet_output: dict | None = None,
+    skills_output: dict | None = None,
 ) -> dict:
     """Assemble a result from default fixtures unless values are provided."""
     return assemble_resume_output(
         resume_draft() if draft is None else draft,
         professional_summary_output() if summary_output is None else summary_output,
         experience_bullet_output() if bullet_output is None else bullet_output,
+        skills_output,
     )
 
 
@@ -99,8 +117,12 @@ def test_final_resume_contains_skills() -> None:
     result = assembled_result()
 
     assert result["final_resume"]["skills"] == {
-        "key_skills": ["Excel", "Reporting"],
+        "technical": ["Excel", "Reporting"],
+        "soft": [],
+        "tools": [],
+        "domain": [],
         "matched_skills": ["Excel"],
+        "strongest_skills": [],
     }
 
 
@@ -123,6 +145,7 @@ def test_final_resume_contains_metadata() -> None:
         "version",
         "summary_source",
         "bullet_source",
+        "skills_source",
     }
 
 
@@ -243,7 +266,7 @@ def test_preserves_bullet_text_exactly() -> None:
 def test_uses_resume_draft_key_skills() -> None:
     result = assembled_result()
 
-    assert result["final_resume"]["skills"]["key_skills"] == ["Excel", "Reporting"]
+    assert result["final_resume"]["skills"]["technical"] == ["Excel", "Reporting"]
 
 
 def test_uses_resume_draft_matched_skills() -> None:
@@ -259,7 +282,7 @@ def test_missing_key_skills_uses_empty_list_and_marks_partial() -> None:
     result = assembled_result(draft=draft)
 
     assert result["status"] == "partial"
-    assert result["final_resume"]["skills"]["key_skills"] == []
+    assert result["final_resume"]["skills"]["technical"] == []
     assert "Resume draft key_skills missing; used empty list." in result["errors"]
 
 
@@ -374,6 +397,84 @@ def test_output_schema_remains_stable() -> None:
         "experience_bullets",
         "metadata",
     }
+
+
+def test_old_three_argument_assembler_call_still_works() -> None:
+    result = assemble_resume_output(
+        resume_draft(),
+        professional_summary_output(),
+        experience_bullet_output(),
+    )
+
+    assert result["status"] == "success"
+    assert result["final_resume"]["skills"]["technical"] == ["Excel", "Reporting"]
+
+
+def test_assembler_accepts_optional_skills_section_output() -> None:
+    result = assembled_result(skills_output=skills_section_output())
+
+    assert result["status"] == "success"
+
+
+def test_uses_successful_skills_section_output() -> None:
+    result = assembled_result(skills_output=skills_section_output())
+
+    assert result["final_resume"]["skills"] == skills_section_output()["skills_section"]
+    assert result["final_resume"]["metadata"]["skills_source"] == "skills_section_generator"
+
+
+def test_uses_partial_skills_section_output_when_section_exists() -> None:
+    result = assembled_result(skills_output=skills_section_output("partial"))
+
+    assert result["final_resume"]["skills"] == skills_section_output("partial")["skills_section"]
+    assert result["final_resume"]["metadata"]["skills_source"] == "skills_section_generator"
+
+
+def test_falls_back_when_skills_section_output_is_none() -> None:
+    result = assembled_result(skills_output=None)
+
+    assert result["final_resume"]["skills"] == {
+        "technical": ["Excel", "Reporting"],
+        "soft": [],
+        "tools": [],
+        "domain": [],
+        "matched_skills": ["Excel"],
+        "strongest_skills": [],
+    }
+    assert result["final_resume"]["metadata"]["skills_source"] == "resume_draft_fallback"
+
+
+def test_falls_back_when_skills_section_output_failed() -> None:
+    result = assembled_result(skills_output=skills_section_output("failed"))
+
+    assert result["final_resume"]["skills"]["technical"] == ["Excel", "Reporting"]
+    assert result["final_resume"]["metadata"]["skills_source"] == "resume_draft_fallback"
+
+
+def test_falls_back_when_skills_section_missing_skills_section() -> None:
+    result = assembled_result(skills_output={"status": "success", "errors": []})
+
+    assert result["final_resume"]["skills"]["technical"] == ["Excel", "Reporting"]
+    assert result["final_resume"]["metadata"]["skills_source"] == "resume_draft_fallback"
+
+
+def test_final_resume_skills_uses_structured_schema() -> None:
+    result = assembled_result()
+
+    assert set(result["final_resume"]["skills"]) == {
+        "technical",
+        "soft",
+        "tools",
+        "domain",
+        "matched_skills",
+        "strongest_skills",
+    }
+
+
+def test_metadata_includes_skills_source() -> None:
+    result = assembled_result()
+
+    assert result["final_resume"]["metadata"]["skills_source"] == "resume_draft_fallback"
 
 
 def test_ai_contract_doc_includes_search_grounding_boundary() -> None:

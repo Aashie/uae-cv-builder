@@ -18,6 +18,7 @@ from engine.resume_output_assembler import assemble_resume_output
 from engine.resume_draft_builder import build_resume_draft
 from engine.scorer import calculate_match_score
 from engine.skill_gap_analyzer import analyze_skill_gaps
+from engine.skills_section_generator import generate_skills_section
 
 
 def _default_skill_gaps() -> dict:
@@ -105,6 +106,22 @@ def _default_resume_output() -> dict:
     }
 
 
+def _default_skills_section_output() -> dict:
+    """Return the default skills section output wrapper."""
+    return {
+        "status": "",
+        "errors": [],
+        "skills_section": {
+            "technical": [],
+            "soft": [],
+            "tools": [],
+            "domain": [],
+            "matched_skills": [],
+            "strongest_skills": [],
+        },
+    }
+
+
 def _default_output() -> dict:
     """Return the full orchestrator output schema with default values."""
     return {
@@ -121,6 +138,7 @@ def _default_output() -> dict:
         "readiness_tier": "",
         "career_insights": {},
         "resume_draft": {},
+        "skills_section_output": {},
         "summary": "",
         "ai_validation": _default_ai_validation(),
         "experience_bullet_output": {},
@@ -259,6 +277,21 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
         resume_draft = build_resume_draft(prompt_package)
 
         try:
+            skills_section_output = generate_skills_section(
+                resume_draft,
+                matcher_output,
+                career_insights_output,
+            )
+        except Exception:
+            skills_section_output = _default_skills_section_output()
+            skills_section_output["status"] = "failed"
+
+        if skills_section_output.get("status") == "partial":
+            output["errors"].append("Skills section generation returned partial status.")
+        elif skills_section_output.get("status") == "failed":
+            output["errors"].append("Skills section generation failed.")
+
+        try:
             ai_output = generate_professional_summary(prompt_package, resume_draft)
         except Exception as error:
             ai_output = _ai_output_from_resume_draft(resume_draft)
@@ -321,6 +354,7 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
             resume_draft,
             professional_summary_output_for_assembler,
             experience_bullet_output,
+            skills_section_output,
         )
         if resume_output.get("status") == "partial":
             output["errors"].append("Resume output assembly returned partial status.")
@@ -354,6 +388,7 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
     output["readiness_tier"] = recommendation_output.get("readiness_tier", "")
     output["career_insights"] = career_insights_output
     output["resume_draft"] = resume_draft
+    output["skills_section_output"] = skills_section_output
     output["summary"] = ai_output.get("summary", "")
     output["ai_validation"] = ai_validation
     output["experience_bullet_output"] = experience_bullet_output

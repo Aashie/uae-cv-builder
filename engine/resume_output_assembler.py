@@ -12,8 +12,12 @@ def _empty_final_resume() -> dict:
         "job_title": "",
         "professional_summary": "",
         "skills": {
-            "key_skills": [],
+            "technical": [],
+            "soft": [],
+            "tools": [],
+            "domain": [],
             "matched_skills": [],
+            "strongest_skills": [],
         },
         "experience_bullets": [],
         "metadata": {
@@ -21,6 +25,7 @@ def _empty_final_resume() -> dict:
             "version": "v1",
             "summary_source": "empty",
             "bullet_source": "empty",
+            "skills_source": "resume_draft_fallback",
         },
     }
 
@@ -94,24 +99,53 @@ def _resolve_experience_bullets(
     return bullets, "ai_generated"
 
 
-def _resolve_skills(resume_draft: dict, errors: list[str]) -> dict:
-    """Resolve key_skills and matched_skills from resume_draft only."""
-    if "key_skills" in resume_draft:
-        key_skills = resume_draft["key_skills"]
-    else:
-        key_skills = []
-        errors.append("Resume draft key_skills missing; used empty list.")
+def _fallback_skills(resume_draft: dict, errors: list[str]) -> dict:
+    """Return structured fallback skills from resume_draft."""
+    key_skills = resume_draft.get("key_skills", [])
+    matched_skills = resume_draft.get("matched_skills", [])
 
-    if "matched_skills" in resume_draft:
-        matched_skills = resume_draft["matched_skills"]
-    else:
-        matched_skills = []
+    if "key_skills" not in resume_draft:
+        errors.append("Resume draft key_skills missing; used empty list.")
+    if "matched_skills" not in resume_draft:
         errors.append("Resume draft matched_skills missing; used empty list.")
 
     return {
-        "key_skills": key_skills,
+        "technical": key_skills,
+        "soft": [],
+        "tools": [],
+        "domain": [],
         "matched_skills": matched_skills,
+        "strongest_skills": [],
     }
+
+
+def _has_structured_skills(skills_section: dict) -> bool:
+    """Return whether a skills section contains the structured skills schema."""
+    return isinstance(skills_section, dict) and {
+        "technical",
+        "soft",
+        "tools",
+        "domain",
+        "matched_skills",
+        "strongest_skills",
+    }.issubset(skills_section)
+
+
+def _resolve_skills(
+    resume_draft: dict,
+    skills_section_output: dict | None,
+    errors: list[str],
+) -> tuple[dict, str]:
+    """Resolve structured skills and skills_source metadata."""
+    if skills_section_output is not None:
+        skills_section = skills_section_output.get("skills_section")
+        if (
+            skills_section_output.get("status") in {"success", "partial"}
+            and _has_structured_skills(skills_section)
+        ):
+            return skills_section, "skills_section_generator"
+
+    return _fallback_skills(resume_draft, errors), "resume_draft_fallback"
 
 
 def _resolve_job_title(resume_draft: dict, errors: list[str]) -> str:
@@ -127,6 +161,7 @@ def assemble_resume_output(
     resume_draft: dict,
     professional_summary_output: dict,
     experience_bullet_output: dict,
+    skills_section_output=None,
 ) -> dict:
     """Assemble already-generated resume components into a final resume output."""
     if resume_draft is None or resume_draft == {}:
@@ -148,12 +183,18 @@ def assemble_resume_output(
         experience_bullet_output,
         errors,
     )
+    skills, skills_source = _resolve_skills(
+        resume_draft,
+        skills_section_output,
+        errors,
+    )
 
     final_resume["job_title"] = _resolve_job_title(resume_draft, errors)
     final_resume["professional_summary"] = summary
-    final_resume["skills"] = _resolve_skills(resume_draft, errors)
+    final_resume["skills"] = skills
     final_resume["experience_bullets"] = bullets
     final_resume["metadata"]["summary_source"] = summary_source
     final_resume["metadata"]["bullet_source"] = bullet_source
+    final_resume["metadata"]["skills_source"] = skills_source
 
     return _wrapper(_status_from_errors(errors), errors, final_resume)
