@@ -274,6 +274,7 @@ def test_output_schema_contains_required_top_level_fields() -> None:
         "hallucination_check",
         "resume_output",
         "final_resume",
+        "final_resume_validation",
     }
 
 
@@ -401,6 +402,18 @@ def test_final_resume_exists() -> None:
     result = orchestrator.run_resume_analysis(make_profile(), make_job())
 
     assert result["final_resume"] == result["resume_output"]["final_resume"]
+
+
+def test_final_resume_validation_exists() -> None:
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert set(result["final_resume_validation"]) == {
+        "is_valid",
+        "errors",
+        "warnings",
+    }
+    assert result["final_resume_validation"]["is_valid"] is True
+    assert "final_resume_schema_validator" in result["completed_stages"]
 
 
 def test_successful_pipeline_includes_structured_final_resume_skills() -> None:
@@ -807,3 +820,67 @@ def test_late_assembler_failure_preserves_partial_outputs(monkeypatch) -> None:
     assert result["final_resume"] == {}
     assert result["resume_output"].get("status") == ""
     assert result["resume_output"].get("final_resume") == {}
+
+
+def test_final_resume_validation_failure_marks_partial_and_preserves_resume(
+    monkeypatch,
+) -> None:
+    final_resume = {
+        "job_title": "Operations Coordinator",
+        "professional_summary": "Summary.",
+        "skills": {
+            "technical": ["Excel"],
+            "soft": [],
+            "tools": [],
+            "domain": [],
+            "matched_skills": ["Excel"],
+            "strongest_skills": [],
+        },
+        "experience_bullets": [],
+        "metadata": {},
+    }
+
+    monkeypatch.setattr(
+        orchestrator,
+        "assemble_resume_output",
+        lambda resume_draft, summary_output, bullet_output, skills_output=None: {
+            "status": "success",
+            "errors": [],
+            "final_resume": final_resume,
+        },
+    )
+    monkeypatch.setattr(
+        orchestrator,
+        "validate_final_resume",
+        lambda final_resume: {
+            "is_valid": False,
+            "errors": ["Final resume is invalid."],
+            "warnings": [],
+        },
+    )
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "partial"
+    assert result["final_resume"] == final_resume
+    assert result["final_resume_validation"] == {
+        "is_valid": False,
+        "errors": ["Final resume is invalid."],
+        "warnings": [],
+    }
+    assert "Final resume is invalid." in result["errors"]
+
+
+def test_final_resume_validator_exception_preserves_partial_outputs(monkeypatch) -> None:
+    def fail_validator(final_resume):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(orchestrator, "validate_final_resume", fail_validator)
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "failed"
+    assert result["failed_stage"] == "final_resume_schema_validator"
+    assert "Resume analysis failed: boom" in result["errors"]
+    assert result["final_resume"] != {}
+    assert result["resume_output"] != {}

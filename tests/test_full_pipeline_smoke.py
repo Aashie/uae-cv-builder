@@ -78,6 +78,7 @@ def test_full_pipeline_smoke_administrative_assistant() -> None:
         "skills_section_output",
         "resume_output",
         "final_resume",
+        "final_resume_validation",
     }
     assert expected_top_level_fields.issubset(result)
 
@@ -91,6 +92,10 @@ def test_full_pipeline_smoke_administrative_assistant() -> None:
     assert isinstance(result["skills_section_output"], dict)
     assert isinstance(result["resume_output"], dict)
     assert isinstance(result["final_resume"], dict)
+    assert isinstance(result["final_resume_validation"], dict)
+    assert {"is_valid", "errors", "warnings"}.issubset(
+        result["final_resume_validation"]
+    )
 
     for stage in {
         "evidence_extraction",

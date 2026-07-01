@@ -9,6 +9,7 @@ from engine.ai_response_validator import validate_ai_response
 from engine.career_insights_engine import analyze_career_insights
 from engine.evidence_extractor import extract_evidence
 from engine.experience_bullet_generator import generate_experience_bullets
+from engine.final_resume_schema_validator import validate_final_resume
 from engine.hallucination_checker import check_hallucinations
 from engine.matcher import match_job_to_profile
 from engine.professional_summary_generator import generate_professional_summary
@@ -148,6 +149,11 @@ def _default_output() -> dict:
         "hallucination_check": _default_hallucination_check(),
         "resume_output": _default_resume_output(),
         "final_resume": {},
+        "final_resume_validation": {
+            "is_valid": False,
+            "errors": [],
+            "warnings": [],
+        },
     }
 
 
@@ -439,6 +445,13 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
             output["errors"].extend(resume_output.get("errors", []))
         elif resume_output.get("status") == "failed":
             output["errors"].append("Resume output assembly failed.")
+
+        current_stage = "final_resume_schema_validator"
+        final_resume_validation = validate_final_resume(output["final_resume"])
+        output["final_resume_validation"] = final_resume_validation
+        completed_stages.append("final_resume_schema_validator")
+        if not final_resume_validation["is_valid"]:
+            output["errors"].extend(final_resume_validation["errors"])
 
     except Exception as error:
         output["status"] = "failed"
