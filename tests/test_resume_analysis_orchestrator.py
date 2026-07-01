@@ -256,6 +256,8 @@ def test_output_schema_contains_required_top_level_fields() -> None:
     assert set(result) == {
         "status",
         "errors",
+        "failed_stage",
+        "completed_stages",
         "match_score",
         "matched_skills",
         "missing_skills",
@@ -777,3 +779,31 @@ def test_career_insights_still_runs_immediately_after_evidence_extractor(monkeyp
     orchestrator.run_resume_analysis(make_profile(), make_job())
 
     assert events[:3] == ["extract", "career", "matcher"]
+
+
+def test_late_assembler_failure_preserves_partial_outputs(monkeypatch) -> None:
+    def fail_assembler(
+        resume_draft,
+        professional_summary_output,
+        experience_bullet_output,
+        skills_section_output=None,
+    ):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(orchestrator, "assemble_resume_output", fail_assembler)
+
+    result = orchestrator.run_resume_analysis(make_profile(), make_job())
+
+    assert result["status"] == "failed"
+    assert isinstance(result["errors"], list)
+    assert "Resume analysis failed: boom" in result["errors"]
+    assert result["failed_stage"] == "resume_output_assembler"
+    assert "resume_draft_builder" in result["completed_stages"]
+    assert "skills_section_generator" in result["completed_stages"]
+    assert result["resume_draft"] != {}
+    assert result["skills_section_output"] != {}
+    assert "partial_outputs" not in result
+    assert "error" not in result
+    assert result["final_resume"] == {}
+    assert result["resume_output"].get("status") == ""
+    assert result["resume_output"].get("final_resume") == {}

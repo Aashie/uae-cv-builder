@@ -127,6 +127,8 @@ def _default_output() -> dict:
     return {
         "status": "",
         "errors": [],
+        "failed_stage": "",
+        "completed_stages": [],
         "match_score": 0,
         "matched_skills": [],
         "missing_skills": [],
@@ -222,6 +224,8 @@ def _set_status(output: dict) -> None:
 def run_resume_analysis(profile: dict, job_description) -> dict:
     """Run the full resume analysis pipeline and return a unified output package."""
     output = _default_output()
+    completed_stages = output["completed_stages"]
+    current_stage = ""
 
     if _is_empty_profile(profile):
         output["status"] = "failed"
@@ -239,33 +243,79 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
         return output
 
     try:
+        current_stage = "evidence_extraction"
         evidence_items = extract_evidence(profile)
         profile_skills = _extract_profile_skills(profile)
+        completed_stages.append("evidence_extraction")
 
         try:
+            current_stage = "career_insights_engine"
             career_insights_output = analyze_career_insights(evidence_items)
+            output["career_insights"] = career_insights_output
+            completed_stages.append("career_insights_engine")
         except Exception as error:
             career_insights_output = _default_career_insights()
+            output["career_insights"] = career_insights_output
             output["errors"].append(f"Career insights failed: {error}")
 
+        current_stage = "matcher"
         matcher_output = match_job_to_profile(
             job_description,
             profile_skills,
             evidence_items,
         )
+        output["matched_skills"] = matcher_output.get("matched_skills", [])
+        output["missing_skills"] = matcher_output.get("missing_skills", [])
+        completed_stages.append("matcher")
+
+        current_stage = "scorer"
         score_output = calculate_match_score(matcher_output, job_description)
+        output["match_score"] = score_output.get("match_score", 0)
+        completed_stages.append("scorer")
+
+        current_stage = "skill_gap_analyzer"
         skill_gap_output = analyze_skill_gaps(matcher_output)
+        output["skill_gaps"] = {
+            "critical_gaps": skill_gap_output.get("critical_gaps", []),
+            "minor_gaps": skill_gap_output.get("minor_gaps", []),
+        }
+        completed_stages.append("skill_gap_analyzer")
 
         try:
+            current_stage = "recommendation_engine"
             recommendation_output = generate_recommendations(
                 matcher_output,
                 skill_gap_output,
                 score_output,
             )
+            output["recommendations"] = {
+                "resume_recommendations": recommendation_output.get(
+                    "resume_recommendations",
+                    [],
+                ),
+                "career_recommendations": recommendation_output.get(
+                    "career_recommendations",
+                    [],
+                ),
+            }
+            output["readiness_tier"] = recommendation_output.get("readiness_tier", "")
+            completed_stages.append("recommendation_engine")
         except Exception as error:
             recommendation_output = _default_recommendations()
+            output["recommendations"] = {
+                "resume_recommendations": recommendation_output.get(
+                    "resume_recommendations",
+                    [],
+                ),
+                "career_recommendations": recommendation_output.get(
+                    "career_recommendations",
+                    [],
+                ),
+            }
+            output["readiness_tier"] = recommendation_output.get("readiness_tier", "")
             output["errors"].append(f"Recommendation engine failed: {error}")
 
+        current_stage = "prompt_builder"
         prompt_package = build_prompt_package(
             job_description,
             matcher_output,
@@ -274,29 +324,40 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
             recommendation_output,
             career_insights_output,
         )
+        completed_stages.append("prompt_builder")
+
+        current_stage = "resume_draft_builder"
         resume_draft = build_resume_draft(prompt_package)
+        output["resume_draft"] = resume_draft
+        completed_stages.append("resume_draft_builder")
 
         try:
+            current_stage = "skills_section_generator"
             skills_section_output = generate_skills_section(
                 resume_draft,
                 matcher_output,
                 career_insights_output,
             )
+            completed_stages.append("skills_section_generator")
         except Exception:
             skills_section_output = _default_skills_section_output()
             skills_section_output["status"] = "failed"
 
+        output["skills_section_output"] = skills_section_output
         if skills_section_output.get("status") == "partial":
             output["errors"].append("Skills section generation returned partial status.")
         elif skills_section_output.get("status") == "failed":
             output["errors"].append("Skills section generation failed.")
 
         try:
+            current_stage = "professional_summary_generator"
             ai_output = generate_professional_summary(prompt_package, resume_draft)
+            completed_stages.append("professional_summary_generator")
         except Exception as error:
             ai_output = _ai_output_from_resume_draft(resume_draft)
             output["errors"].append(f"Professional summary generation failed: {error}")
 
+        current_stage = "professional_summary_validator"
         ai_validation = validate_ai_response(ai_output)
         professional_summary_output_for_assembler = ai_output
         if not ai_validation["is_valid"]:
@@ -304,9 +365,14 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
                 f"Professional summary validation failed: {ai_validation['errors']}"
             )
             professional_summary_output_for_assembler = _empty_ai_output()
+        output["summary"] = professional_summary_output_for_assembler.get("summary", "")
+        output["ai_validation"] = ai_validation
+        completed_stages.append("professional_summary_validator")
 
         try:
+            current_stage = "experience_bullet_generator"
             experience_bullet_output = generate_experience_bullets(evidence_items)
+            completed_stages.append("experience_bullet_generator")
         except Exception:
             experience_bullet_output = _empty_experience_bullet_output()
             output["errors"].append("Experience bullet generation failed.")
@@ -322,10 +388,12 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
         hallucination_check = _default_hallucination_check()
 
         if experience_bullet_output.get("status") != "failed":
+            current_stage = "experience_bullet_validator"
             experience_bullet_validation = validate_ai_response(
                 experience_bullet_output.get("ai_output", _empty_ai_output()),
                 context="experience_bullets",
             )
+            completed_stages.append("experience_bullet_validator")
 
             if not experience_bullet_validation["is_valid"]:
                 output["errors"].append(
@@ -337,10 +405,12 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
                     [],
                 )
             else:
+                current_stage = "hallucination_checker"
                 hallucination_check = check_hallucinations(
                     experience_bullet_output["ai_output"],
                     evidence_items,
                 )
+                completed_stages.append("hallucination_checker")
             if hallucination_check["hallucination_count"] > 0:
                 output["errors"].append(
                     "Hallucination checker removed unsupported bullets."
@@ -350,12 +420,20 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
                     hallucination_check["passed_bullets"],
                 )
 
+        output["experience_bullet_output"] = experience_bullet_output
+        output["experience_bullet_validation"] = experience_bullet_validation
+        output["hallucination_check"] = hallucination_check
+
+        current_stage = "resume_output_assembler"
         resume_output = assemble_resume_output(
             resume_draft,
             professional_summary_output_for_assembler,
             experience_bullet_output,
             skills_section_output,
         )
+        output["resume_output"] = resume_output
+        output["final_resume"] = resume_output.get("final_resume", {})
+        completed_stages.append("resume_output_assembler")
         if resume_output.get("status") == "partial":
             output["errors"].append("Resume output assembly returned partial status.")
             output["errors"].extend(resume_output.get("errors", []))
@@ -363,39 +441,11 @@ def run_resume_analysis(profile: dict, job_description) -> dict:
             output["errors"].append("Resume output assembly failed.")
 
     except Exception as error:
-        output = _default_output()
         output["status"] = "failed"
+        output["failed_stage"] = current_stage
         output["errors"].append(f"Resume analysis failed: {error}")
         return output
 
-    output["match_score"] = score_output.get("match_score", 0)
-    output["matched_skills"] = matcher_output.get("matched_skills", [])
-    output["missing_skills"] = matcher_output.get("missing_skills", [])
-    output["skill_gaps"] = {
-        "critical_gaps": skill_gap_output.get("critical_gaps", []),
-        "minor_gaps": skill_gap_output.get("minor_gaps", []),
-    }
-    output["recommendations"] = {
-        "resume_recommendations": recommendation_output.get(
-            "resume_recommendations",
-            [],
-        ),
-        "career_recommendations": recommendation_output.get(
-            "career_recommendations",
-            [],
-        ),
-    }
-    output["readiness_tier"] = recommendation_output.get("readiness_tier", "")
-    output["career_insights"] = career_insights_output
-    output["resume_draft"] = resume_draft
-    output["skills_section_output"] = skills_section_output
-    output["summary"] = ai_output.get("summary", "")
-    output["ai_validation"] = ai_validation
-    output["experience_bullet_output"] = experience_bullet_output
-    output["experience_bullet_validation"] = experience_bullet_validation
-    output["hallucination_check"] = hallucination_check
-    output["resume_output"] = resume_output
-    output["final_resume"] = resume_output.get("final_resume", {})
     _set_status(output)
 
     return output
