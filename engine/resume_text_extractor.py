@@ -23,14 +23,24 @@ EXTRACTOR_METADATA = {
 }
 
 
-def _result(status: str, text: str = "", errors: list[str] | None = None) -> dict:
+def _result(
+    status: str,
+    text: str = "",
+    errors: list[str] | None = None,
+    warnings: list[str] | None = None,
+    metadata: dict | None = None,
+) -> dict:
     """Return the resume text extractor result shape."""
+    result_metadata = EXTRACTOR_METADATA.copy()
+    if metadata:
+        result_metadata.update(metadata)
+
     return {
         "status": status,
         "text": text,
         "errors": errors or [],
-        "warnings": [],
-        "metadata": EXTRACTOR_METADATA.copy(),
+        "warnings": warnings or [],
+        "metadata": result_metadata,
     }
 
 
@@ -72,8 +82,8 @@ def _extract_document_text(document: DocumentObject) -> str:
     return "\n".join(lines)
 
 
-def _validate_file_path(file_path: str) -> list[str]:
-    """Validate the DOCX file path without repairing it."""
+def _validate_file_path(file_path: str, expected_suffix: str) -> list[str]:
+    """Validate the file path without repairing it."""
     if not isinstance(file_path, str):
         return ["file_path must be a string."]
 
@@ -81,8 +91,8 @@ def _validate_file_path(file_path: str) -> list[str]:
         return ["file_path must be a non-empty string."]
 
     path = Path(file_path)
-    if path.suffix.lower() != ".docx":
-        return ["file_path must point to a .docx file."]
+    if path.suffix.lower() != expected_suffix:
+        return [f"file_path must point to a {expected_suffix} file."]
     if not path.exists():
         return ["file_path file does not exist."]
     if not path.is_file():
@@ -93,7 +103,7 @@ def _validate_file_path(file_path: str) -> list[str]:
 
 def extract_text_from_docx(file_path: str) -> dict:
     """Extract readable text from DOCX paragraphs and tables."""
-    validation_errors = _validate_file_path(file_path)
+    validation_errors = _validate_file_path(file_path, ".docx")
     if validation_errors:
         return _result("failed", errors=validation_errors)
 
@@ -107,3 +117,48 @@ def extract_text_from_docx(file_path: str) -> dict:
         return _result("failed", errors=["DOCX contains no extractable text."])
 
     return _result("success", text=text)
+
+
+def extract_text_from_pdf(file_path: str) -> dict:
+    """Extract readable text from selectable-text PDF pages."""
+    validation_errors = _validate_file_path(file_path, ".pdf")
+    if validation_errors:
+        return _result(
+            "failed",
+            errors=validation_errors,
+            metadata={"source": "uploaded_pdf"},
+        )
+
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        return _result(
+            "failed",
+            errors=["pypdf is required for PDF text extraction."],
+            metadata={"source": "uploaded_pdf"},
+        )
+
+    try:
+        reader = PdfReader(file_path)
+        page_count = len(reader.pages)
+        page_text: list[str] = []
+        for page in reader.pages:
+            text = _normalize_text(page.extract_text() or "")
+            if text:
+                page_text.append(text)
+    except Exception as error:
+        return _result(
+            "failed",
+            errors=[f"PDF text extraction failed: {error}"],
+            metadata={"source": "uploaded_pdf"},
+        )
+
+    metadata = {"source": "uploaded_pdf", "page_count": page_count}
+    if not page_text:
+        return _result(
+            "failed",
+            errors=["PDF contains no extractable selectable text."],
+            metadata=metadata,
+        )
+
+    return _result("success", text="\n\n".join(page_text), metadata=metadata)
