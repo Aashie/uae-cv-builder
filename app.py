@@ -1,4 +1,4 @@
-﻿"""
+"""
 Streamlit demo UI for UAE CV Builder.
 
 Purpose:
@@ -134,7 +134,11 @@ def main() -> None:
     if st is None:
         raise ModuleNotFoundError("streamlit is required to run the demo UI")
 
-    st.set_page_config(page_title="UAE CV Builder Demo")
+    st.set_page_config(
+        page_title="UAE CV Builder Demo",
+        page_icon="📄",
+        layout="wide",
+    )
     st.title("UAE CV Builder Demo")
     st.write("Evidence-based resume analysis and DOCX generation for UAE job applications.")
 

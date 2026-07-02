@@ -1,4 +1,4 @@
-﻿# UAE CV Builder
+# UAE CV Builder
 
 An evidence-based Python resume/career intelligence platform for UAE job seekers. It takes a candidate profile and job description, extracts evidence, matches skills, scores fit, identifies gaps, generates safe resume sections, validates final resume structure, and exports a DOCX resume through a Streamlit demo.
 
