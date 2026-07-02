@@ -1,0 +1,27 @@
+{
+  "name": "Sample Candidate",
+  "skills": [
+    "Documentation",
+    "Microsoft Excel",
+    "Communication",
+    "Scheduling",
+    "Reporting",
+    "Leadership"
+  ],
+  "experience": [
+    {
+      "id": "exp-1",
+      "text": "Coordinated office documentation, maintained Microsoft Excel reporting trackers, supported staff scheduling, communicated with internal teams, and prepared regular administrative reports.",
+      "skills": [
+        "Documentation",
+        "Microsoft Excel",
+        "Communication",
+        "Scheduling",
+        "Reporting"
+      ]
+    }
+  ],
+  "projects": [],
+  "certifications": [],
+  "achievements": []
+}
