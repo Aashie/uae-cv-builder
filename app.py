@@ -16,6 +16,11 @@ except ModuleNotFoundError:  # Keep helper imports testable when streamlit is un
 from models.job_description import JobDescription
 
 
+SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
+SAMPLE_PROFILE_PATH = SAMPLES_DIR / "sample_profile_admin.json"
+SAMPLE_JOB_PATH = SAMPLES_DIR / "sample_job_admin.json"
+
+
 def parse_skill_lines(text: str) -> list[str]:
     """Parse newline or comma-separated skills into a clean list."""
     if not isinstance(text, str):
@@ -25,60 +30,36 @@ def parse_skill_lines(text: str) -> list[str]:
     return [skill.strip() for skill in normalized.splitlines() if skill.strip()]
 
 
+def load_sample_profile() -> dict:
+    """Load the sample administrative profile JSON."""
+    if not SAMPLE_PROFILE_PATH.exists():
+        raise FileNotFoundError(f"Sample profile file not found: {SAMPLE_PROFILE_PATH}")
+
+    return json.loads(SAMPLE_PROFILE_PATH.read_text(encoding="utf-8"))
+
+
+def load_sample_job_values() -> dict:
+    """Load the sample administrative job JSON."""
+    if not SAMPLE_JOB_PATH.exists():
+        raise FileNotFoundError(f"Sample job file not found: {SAMPLE_JOB_PATH}")
+
+    return json.loads(SAMPLE_JOB_PATH.read_text(encoding="utf-8"))
+
+
 def get_sample_profile() -> dict:
-    """Return a realistic sample administrative profile."""
-    return {
-        "name": "Sample Candidate",
-        "skills": [
-            "Documentation",
-            "Microsoft Excel",
-            "Communication",
-            "Scheduling",
-            "Reporting",
-            "Leadership",
-        ],
-        "experience": [
-            {
-                "id": "exp-1",
-                "text": (
-                    "Coordinated office documentation, maintained Microsoft Excel "
-                    "reporting trackers, supported staff scheduling, communicated "
-                    "with internal teams, and prepared regular administrative reports."
-                ),
-                "skills": [
-                    "Documentation",
-                    "Microsoft Excel",
-                    "Communication",
-                    "Scheduling",
-                    "Reporting",
-                ],
-            }
-        ],
-        "projects": [],
-        "certifications": [],
-        "achievements": [],
-    }
+    """Return the sample administrative profile from samples/."""
+    return load_sample_profile()
 
 
 def get_default_job_values() -> dict:
-    """Return default sample job values for the demo."""
+    """Return sample job values formatted for Streamlit inputs."""
+    job = load_sample_job_values()
     return {
-        "job_title": "Administrative Assistant",
-        "required_skills": "\n".join(
-            [
-                "Documentation",
-                "Microsoft Excel",
-                "Communication",
-                "Scheduling",
-                "Reporting",
-                "Leadership",
-                "Records Management",
-                "Office Coordination",
-            ]
-        ),
-        "soft_skills": "\n".join(["Communication", "Leadership"]),
-        "experience_level": "Mid",
-        "education": "Bachelor's",
+        "job_title": job.get("job_title", ""),
+        "required_skills": "\n".join(job.get("required_skills", [])),
+        "soft_skills": "\n".join(job.get("soft_skills", [])),
+        "experience_level": job.get("experience_level", ""),
+        "education": job.get("education", ""),
     }
 
 
@@ -207,5 +188,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
