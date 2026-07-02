@@ -272,60 +272,98 @@ def main() -> None:
     st.markdown('<div class="accent-line"></div>', unsafe_allow_html=True)
     st.markdown(_badge("No-invention resume pipeline", "gray"), unsafe_allow_html=True)
 
-    defaults = get_default_job_values()
-    input_cols = st.columns(2)
+    st.markdown("## Start with your CV and job description")
+    primary_cols = st.columns(2)
+    with primary_cols[0]:
+        st.markdown('<div class="card-title">Upload your CV</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="card-subtitle">Upload your existing CV. The system will eventually extract only information present in your document.</div>',
+            unsafe_allow_html=True,
+        )
+        uploaded_cv = st.file_uploader("Upload your CV", type=["pdf", "docx"])
+        if uploaded_cv is not None:
+            st.write("File name:", uploaded_cv.name)
+            st.write("File type:", uploaded_cv.type or "Unknown")
+            st.write("File size:", f"{uploaded_cv.size:,} bytes")
 
-    with input_cols[0]:
-        st.markdown('<div class="card-title">Candidate Profile</div>', unsafe_allow_html=True)
-        st.markdown('<div class="card-subtitle">Paste your profile JSON here</div>', unsafe_allow_html=True)
-        use_sample = st.checkbox("Use sample Administrative Assistant profile", value=True)
-        sample_profile = get_sample_profile()
-        profile_text = st.text_area(
-            "Candidate profile JSON",
-            value=json.dumps(sample_profile if use_sample else {}, indent=2),
-            height=360,
+    with primary_cols[1]:
+        st.markdown('<div class="card-title">Paste full job description</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="card-subtitle">Paste the full job post. You do not need to separate skills manually.</div>',
+            unsafe_allow_html=True,
+        )
+        st.text_area(
+            "Full job description",
+            placeholder=(
+                "Paste the full job description here, including responsibilities, "
+                "requirements, qualifications, and skills."
+            ),
+            height=220,
         )
 
-    with input_cols[1]:
-        st.markdown('<div class="card-title">Job Description</div>', unsafe_allow_html=True)
-        st.markdown('<div class="card-subtitle">Describe the role and required skills</div>', unsafe_allow_html=True)
-        job_title = st.text_input("Job Title", value=defaults["job_title"])
-        required_skills = st.text_area(
-            "Required Skills",
-            value=defaults["required_skills"],
-            help="Use one skill per line or comma-separated skills.",
+    if st.button("Analyze My CV", type="primary"):
+        st.info(
+            "CV upload and full job description parsing are planned for the next "
+            "engine sprints. Use Advanced Demo Mode below to run the current "
+            "structured demo."
         )
-        soft_skills = st.text_area(
-            "Soft Skills",
-            value=defaults["soft_skills"],
-            help="Use one skill per line or comma-separated skills.",
-        )
-        experience_level = st.text_input("Experience Level", value=defaults["experience_level"])
-        education = st.text_input("Education", value=defaults["education"])
 
-    st.markdown("")
-    run_clicked = st.button("▶ Run Analysis", type="primary")
+    result = None
+    with st.expander("Advanced Demo Mode: structured profile analysis", expanded=False):
+        defaults = get_default_job_values()
+        input_cols = st.columns(2)
 
-    if run_clicked:
-        try:
-            profile = json.loads(profile_text)
-        except json.JSONDecodeError as error:
-            st.error(f"Candidate profile JSON is invalid: {error}")
-            return
+        with input_cols[0]:
+            st.markdown('<div class="card-title">Candidate Profile</div>', unsafe_allow_html=True)
+            st.markdown('<div class="card-subtitle">Paste your profile JSON here</div>', unsafe_allow_html=True)
+            use_sample = st.checkbox("Use sample Administrative Assistant profile", value=True)
+            sample_profile = get_sample_profile()
+            profile_text = st.text_area(
+                "Candidate profile JSON",
+                value=json.dumps(sample_profile if use_sample else {}, indent=2),
+                height=360,
+            )
 
-        job_description = build_job_description(
-            {
-                "job_title": job_title,
-                "required_skills": required_skills,
-                "soft_skills": soft_skills,
-                "experience_level": experience_level,
-                "education": education,
-            }
-        )
-        with st.spinner("Running evidence-based analysis..."):
-            result = run_pipeline(profile, job_description)
+        with input_cols[1]:
+            st.markdown('<div class="card-title">Job Description</div>', unsafe_allow_html=True)
+            st.markdown('<div class="card-subtitle">Structured fields for the current working demo</div>', unsafe_allow_html=True)
+            job_title = st.text_input("Job Title", value=defaults["job_title"])
+            required_skills = st.text_area(
+                "Required Skills",
+                value=defaults["required_skills"],
+                help="Use one skill per line or comma-separated skills.",
+            )
+            soft_skills = st.text_area(
+                "Soft Skills",
+                value=defaults["soft_skills"],
+                help="Use one skill per line or comma-separated skills.",
+            )
+            experience_level = st.text_input("Experience Level", value=defaults["experience_level"])
+            education = st.text_input("Education", value=defaults["education"])
+
+        run_clicked = st.button("▶ Run Analysis", type="primary")
+
+        if run_clicked:
+            try:
+                profile = json.loads(profile_text)
+            except json.JSONDecodeError as error:
+                st.error(f"Candidate profile JSON is invalid: {error}")
+                return
+
+            job_description = build_job_description(
+                {
+                    "job_title": job_title,
+                    "required_skills": required_skills,
+                    "soft_skills": soft_skills,
+                    "experience_level": experience_level,
+                    "education": education,
+                }
+            )
+            with st.spinner("Running evidence-based analysis..."):
+                result = run_pipeline(profile, job_description)
+
+    if result:
         _render_analysis_result(result)
-
         final_resume = result.get("final_resume", {})
         if final_resume:
             _render_resume_preview(final_resume)
