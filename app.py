@@ -47,6 +47,15 @@ def _initialize_session_state() -> None:
         "analysis_stale": False,
         "candidate_parse_source_text": "",
         "job_parse_source_text": "",
+        "reviewed_candidate_profile": {},
+        "candidate_review_source_signature": "",
+        "candidate_review_saved": False,
+        "review_name": "",
+        "review_skills": "",
+        "review_experience": "",
+        "review_projects": "",
+        "review_certifications": "",
+        "review_achievements": "",
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -65,6 +74,21 @@ def _clear_downstream_upload_state() -> None:
     st.session_state["analysis_baseline"] = ""
     st.session_state["profile_edited"] = False
     st.session_state["analysis_stale"] = False
+    _clear_candidate_review_state()
+
+
+def _clear_candidate_review_state() -> None:
+    """Clear reviewed candidate profile state."""
+    st.session_state["reviewed_candidate_profile"] = {}
+    st.session_state["candidate_review_source_signature"] = ""
+    st.session_state["candidate_review_saved"] = False
+    st.session_state["review_name"] = ""
+    st.session_state["review_skills"] = ""
+    st.session_state["review_experience"] = ""
+    st.session_state["review_projects"] = ""
+    st.session_state["review_certifications"] = ""
+    st.session_state["review_achievements"] = ""
+    st.session_state["profile_edited"] = False
 
 
 def _clear_candidate_parse_state() -> None:
@@ -76,6 +100,7 @@ def _clear_candidate_parse_state() -> None:
     st.session_state["analysis_baseline"] = ""
     st.session_state["profile_edited"] = False
     st.session_state["analysis_stale"] = False
+    _clear_candidate_review_state()
 
 
 def _clear_job_parse_state() -> None:
@@ -543,6 +568,195 @@ def _render_parsed_preview_before_analysis() -> None:
         _render_job_description_preview()
 
 
+def _candidate_profile_signature(profile: dict) -> str:
+    """Return a deterministic signature for a parsed candidate profile."""
+    return json.dumps(profile or {}, sort_keys=True)
+
+
+def _normalize_review_line(text: str) -> str:
+    """Normalize obvious whitespace in reviewed profile text."""
+    return " ".join(str(text).split())
+
+
+def _review_lines(text: str) -> list[str]:
+    """Return non-empty normalized review lines."""
+    return [
+        _normalize_review_line(line)
+        for line in str(text).splitlines()
+        if _normalize_review_line(line)
+    ]
+
+
+def _item_text(item) -> str:
+    """Return display text for a profile list item."""
+    if isinstance(item, dict):
+        return _normalize_review_line(item.get("text", ""))
+    return _normalize_review_line(item)
+
+
+def _profile_list_to_lines(items: list) -> str:
+    """Convert profile list values to editable line text."""
+    return "\n".join(_item_text(item) for item in items if _item_text(item))
+
+
+def _experience_to_lines(entries: list[dict]) -> str:
+    """Convert experience entries to editable line text."""
+    return "\n".join(
+        _normalize_review_line(entry.get("text", ""))
+        for entry in entries
+        if isinstance(entry, dict) and _normalize_review_line(entry.get("text", ""))
+    )
+
+
+def _copy_profile(profile: dict) -> dict:
+    """Return a JSON-safe copy of a candidate profile."""
+    return json.loads(json.dumps(profile or {}))
+
+
+def _initialize_review_state_from_profile(profile: dict, signature: str) -> None:
+    """Initialize review widget state from a newly parsed candidate profile."""
+    profile_copy = _copy_profile(profile)
+    st.session_state["reviewed_candidate_profile"] = profile_copy
+    st.session_state["candidate_review_source_signature"] = signature
+    st.session_state["candidate_review_saved"] = False
+    st.session_state["profile_edited"] = False
+    st.session_state["review_name"] = profile_copy.get("name", "")
+    st.session_state["review_skills"] = _profile_list_to_lines(
+        profile_copy.get("skills", [])
+    )
+    st.session_state["review_experience"] = _experience_to_lines(
+        profile_copy.get("experience", [])
+    )
+    st.session_state["review_projects"] = _profile_list_to_lines(
+        profile_copy.get("projects", [])
+    )
+    st.session_state["review_certifications"] = _profile_list_to_lines(
+        profile_copy.get("certifications", [])
+    )
+    st.session_state["review_achievements"] = _profile_list_to_lines(
+        profile_copy.get("achievements", [])
+    )
+
+
+def _ensure_candidate_review_state(profile: dict) -> None:
+    """Initialize review state only when parsed candidate profile changes."""
+    signature = _candidate_profile_signature(profile)
+    if signature != st.session_state["candidate_review_source_signature"]:
+        _initialize_review_state_from_profile(profile, signature)
+
+
+def _build_reviewed_experience(lines: list[str], original_entries: list) -> list[dict]:
+    """Build reviewed experience entries while preserving IDs by line order."""
+    reviewed_experience: list[dict] = []
+    for index, line in enumerate(lines):
+        original_id = ""
+        if index < len(original_entries) and isinstance(original_entries[index], dict):
+            original_id = _normalize_review_line(original_entries[index].get("id", ""))
+        reviewed_experience.append(
+            {
+                "id": original_id or f"exp-{index + 1}",
+                "text": line,
+                "skills": [],
+            }
+        )
+    return reviewed_experience
+
+
+def _build_reviewed_candidate_profile() -> dict:
+    """Build a reviewed candidate profile from review form fields."""
+    parsed_profile = st.session_state["parsed_candidate_profile"]
+    original_profile = (
+        st.session_state["reviewed_candidate_profile"]
+        or parsed_profile
+    )
+    reviewed = {
+        "name": _normalize_review_line(st.session_state["review_name"]),
+        "skills": _review_lines(st.session_state["review_skills"]),
+        "experience": _build_reviewed_experience(
+            _review_lines(st.session_state["review_experience"]),
+            original_profile.get("experience", []),
+        ),
+        "projects": _review_lines(st.session_state["review_projects"]),
+        "certifications": _review_lines(st.session_state["review_certifications"]),
+        "achievements": _review_lines(st.session_state["review_achievements"]),
+    }
+    return {key: reviewed.get(key, []) for key in parsed_profile}
+
+
+def _save_reviewed_candidate_profile() -> None:
+    """Persist the reviewed candidate profile for future analysis integration."""
+    st.session_state["reviewed_candidate_profile"] = _build_reviewed_candidate_profile()
+    st.session_state["candidate_review_saved"] = True
+    st.session_state["profile_edited"] = True
+    st.session_state["analysis_result"] = {}
+    st.session_state["analysis_baseline"] = ""
+    st.session_state["analysis_stale"] = True
+
+
+def _render_candidate_review_section() -> None:
+    """Render simple human review/edit UI for parsed candidate profile."""
+    st.markdown("### Review Parsed Candidate Profile")
+    st.caption(
+        "Edit only what is true and supported by your CV or your own knowledge. "
+        "These edits become candidate-provided evidence."
+    )
+
+    parse_result = st.session_state["candidate_parse_result"]
+    parsed_profile = st.session_state["parsed_candidate_profile"]
+    if not (
+        parse_result
+        and parse_result.get("status") == "success"
+        and parsed_profile
+    ):
+        st.info("Upload and parse a CV before reviewing the candidate profile.")
+        return
+
+    _ensure_candidate_review_state(parsed_profile)
+
+    with st.form(key="review_form"):
+        st.text_input("Name", key="review_name")
+        st.text_area(
+            "Skills",
+            help="One skill per line.",
+            height=140,
+            key="review_skills",
+        )
+        st.text_area(
+            "Experience",
+            help="One experience line or bullet per line.",
+            height=180,
+            key="review_experience",
+        )
+        st.text_area(
+            "Projects",
+            help="One project per line.",
+            height=120,
+            key="review_projects",
+        )
+        st.text_area(
+            "Certifications",
+            help="One certification per line.",
+            height=120,
+            key="review_certifications",
+        )
+        st.text_area(
+            "Achievements",
+            help="One achievement per line.",
+            height=120,
+            key="review_achievements",
+        )
+        saved = st.form_submit_button("Save Reviewed Profile")
+
+    if saved:
+        _save_reviewed_candidate_profile()
+
+    if st.session_state["candidate_review_saved"]:
+        st.success("Reviewed candidate profile saved.")
+        st.info("Analysis is still disabled until the next integration sprint.")
+        with st.expander("Reviewed candidate profile", expanded=False):
+            st.json(st.session_state["reviewed_candidate_profile"])
+
+
 def main() -> None:
     """Render the Streamlit demo UI."""
     if st is None:
@@ -595,6 +809,7 @@ def main() -> None:
         )
 
     _render_parsed_preview_before_analysis()
+    _render_candidate_review_section()
 
     st.button("Analyze My CV", type="primary", disabled=True)
     st.info(
