@@ -15,6 +15,8 @@ except ModuleNotFoundError:  # Keep helper imports testable when streamlit is un
     st = None
 
 from models.job_description import JobDescription
+from engine.candidate_profile_text_parser import parse_candidate_profile_text
+from engine.job_description_text_parser import parse_job_description_text
 from engine.resume_text_extractor import extract_resume_text
 
 
@@ -43,6 +45,8 @@ def _initialize_session_state() -> None:
         "analysis_baseline": "",
         "profile_edited": False,
         "analysis_stale": False,
+        "candidate_parse_source_text": "",
+        "job_parse_source_text": "",
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -53,11 +57,34 @@ def _clear_downstream_upload_state() -> None:
     """Clear parser/analysis state that depends on uploaded CV content."""
     st.session_state["parsed_candidate_profile"] = {}
     st.session_state["candidate_parse_result"] = {}
+    st.session_state["candidate_parse_source_text"] = ""
     st.session_state["parsed_jd"] = {}
     st.session_state["job_parse_result"] = {}
+    st.session_state["job_parse_source_text"] = ""
     st.session_state["analysis_result"] = {}
     st.session_state["analysis_baseline"] = ""
     st.session_state["profile_edited"] = False
+    st.session_state["analysis_stale"] = False
+
+
+def _clear_candidate_parse_state() -> None:
+    """Clear parsed candidate profile and analysis state."""
+    st.session_state["parsed_candidate_profile"] = {}
+    st.session_state["candidate_parse_result"] = {}
+    st.session_state["candidate_parse_source_text"] = ""
+    st.session_state["analysis_result"] = {}
+    st.session_state["analysis_baseline"] = ""
+    st.session_state["profile_edited"] = False
+    st.session_state["analysis_stale"] = False
+
+
+def _clear_job_parse_state() -> None:
+    """Clear parsed job description and analysis state."""
+    st.session_state["parsed_jd"] = {}
+    st.session_state["job_parse_result"] = {}
+    st.session_state["job_parse_source_text"] = ""
+    st.session_state["analysis_result"] = {}
+    st.session_state["analysis_baseline"] = ""
     st.session_state["analysis_stale"] = False
 
 
@@ -321,6 +348,7 @@ def _extract_uploaded_cv_text(uploaded_cv) -> dict:
 
 def _store_cv_extraction_result(uploaded_cv, extraction_result: dict) -> None:
     """Store upload metadata and extraction result in session state."""
+    previous_text = st.session_state["extracted_cv_text"]
     st.session_state["uploaded_cv_name"] = uploaded_cv.name
     st.session_state["uploaded_cv_type"] = uploaded_cv.type or "Unknown"
     st.session_state["uploaded_cv_size"] = uploaded_cv.size
@@ -335,6 +363,9 @@ def _store_cv_extraction_result(uploaded_cv, extraction_result: dict) -> None:
         st.session_state["extracted_cv_text"] = ""
         st.session_state["extracted_cv_metadata"] = {}
 
+    if st.session_state["extracted_cv_text"] != previous_text:
+        _clear_candidate_parse_state()
+
 
 def _process_uploaded_cv_if_needed(uploaded_cv) -> None:
     """Extract a new uploaded CV and update upload-flow state."""
@@ -346,7 +377,7 @@ def _process_uploaded_cv_if_needed(uploaded_cv) -> None:
     )
 
     if upload_changed:
-        _clear_downstream_upload_state()
+        _clear_candidate_parse_state()
 
     if upload_changed or not st.session_state["cv_extraction_result"]:
         extraction_result = _extract_uploaded_cv_text(uploaded_cv)
@@ -387,6 +418,129 @@ def _render_uploaded_cv_extraction(uploaded_cv) -> None:
     st.write("File size:", f"{uploaded_cv.size:,} bytes")
 
     _render_cv_extraction_state()
+
+
+def _parse_candidate_profile_if_needed() -> None:
+    """Parse extracted CV text for preview when source text changes."""
+    cv_text = st.session_state["extracted_cv_text"]
+    if not cv_text:
+        st.session_state["parsed_candidate_profile"] = {}
+        return
+
+    if (
+        st.session_state["candidate_parse_result"]
+        and st.session_state["candidate_parse_source_text"] == cv_text
+    ):
+        return
+
+    parse_result = parse_candidate_profile_text(cv_text)
+    st.session_state["candidate_parse_result"] = parse_result
+    if parse_result.get("status") == "success":
+        st.session_state["parsed_candidate_profile"] = parse_result.get(
+            "candidate_profile",
+            {},
+        )
+    else:
+        st.session_state["parsed_candidate_profile"] = {}
+    st.session_state["candidate_parse_source_text"] = cv_text
+
+
+def _parse_job_description_if_needed() -> None:
+    """Parse pasted JD text for preview when source text changes."""
+    job_text = st.session_state["pasted_job_text"]
+    if not job_text.strip():
+        _clear_job_parse_state()
+        return
+
+    if (
+        st.session_state["job_parse_result"]
+        and st.session_state["job_parse_source_text"] == job_text
+    ):
+        return
+
+    parse_result = parse_job_description_text(job_text)
+    st.session_state["job_parse_result"] = parse_result
+    if parse_result.get("status") == "success":
+        st.session_state["parsed_jd"] = parse_result.get("job_description", {})
+    else:
+        st.session_state["parsed_jd"] = {}
+    st.session_state["job_parse_source_text"] = job_text
+
+
+def _render_parser_messages(parse_result: dict) -> None:
+    """Render parser warnings and errors."""
+    if parse_result.get("warnings"):
+        st.warning(parse_result["warnings"])
+    if parse_result.get("errors"):
+        st.write(parse_result["errors"])
+
+
+def _render_candidate_profile_preview() -> None:
+    """Render parsed candidate profile preview."""
+    parse_result = st.session_state["candidate_parse_result"]
+    if not st.session_state["extracted_cv_text"]:
+        st.info("Upload a DOCX or PDF CV to preview parsed candidate profile.")
+        return
+    if not parse_result:
+        return
+
+    if parse_result.get("status") == "success":
+        profile = st.session_state["parsed_candidate_profile"]
+        st.success("Candidate profile parsed successfully.")
+        if profile.get("name"):
+            st.write("Candidate name:", profile["name"])
+        preview_cols = st.columns(3)
+        preview_cols[0].metric("Skills", len(profile.get("skills", [])))
+        preview_cols[1].metric("Experience entries", len(profile.get("experience", [])))
+        preview_cols[2].metric("Certifications", len(profile.get("certifications", [])))
+        with st.expander("Parsed candidate profile", expanded=False):
+            st.json(profile)
+    else:
+        st.error("Candidate profile parsing failed.")
+    _render_parser_messages(parse_result)
+
+
+def _render_job_description_preview() -> None:
+    """Render parsed job description preview."""
+    parse_result = st.session_state["job_parse_result"]
+    if not st.session_state["pasted_job_text"].strip():
+        st.info("Paste a job description to preview parsed job requirements.")
+        return
+    if not parse_result:
+        return
+
+    if parse_result.get("status") == "success":
+        parsed_jd = st.session_state["parsed_jd"]
+        st.success("Job description parsed successfully.")
+        if parsed_jd.get("job_title"):
+            st.write("Job title:", parsed_jd["job_title"])
+        preview_cols = st.columns(2)
+        preview_cols[0].metric("Required skills", len(parsed_jd.get("required_skills", [])))
+        preview_cols[1].metric("Requirements/keywords", len(parsed_jd.get("keywords", [])))
+        with st.expander("Parsed job description", expanded=False):
+            st.json(parsed_jd)
+    else:
+        st.error("Job description parsing failed.")
+    _render_parser_messages(parse_result)
+
+
+def _render_parsed_preview_before_analysis() -> None:
+    """Render upload/paste parser previews before analysis is enabled."""
+    _parse_candidate_profile_if_needed()
+    _parse_job_description_if_needed()
+
+    st.markdown("### Parsed Preview Before Analysis")
+    st.caption(
+        "Review what the system extracted. Full analysis will be enabled after "
+        "the review/edit step."
+    )
+    preview_cols = st.columns(2)
+    with preview_cols[0]:
+        st.markdown('<div class="card-title">Candidate Profile Preview</div>', unsafe_allow_html=True)
+        _render_candidate_profile_preview()
+    with preview_cols[1]:
+        st.markdown('<div class="card-title">Job Description Preview</div>', unsafe_allow_html=True)
+        _render_job_description_preview()
 
 
 def main() -> None:
@@ -440,9 +594,11 @@ def main() -> None:
             key="pasted_job_text",
         )
 
+    _render_parsed_preview_before_analysis()
+
     st.button("Analyze My CV", type="primary", disabled=True)
     st.info(
-        "Full analysis from upload will be available after parsing is complete. "
+        "Full analysis will be enabled after parsed profile review/edit is complete. "
         "Use Advanced Demo Mode below to run the current structured demo."
     )
 
