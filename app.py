@@ -23,6 +23,57 @@ SAMPLE_PROFILE_PATH = SAMPLES_DIR / "sample_profile_admin.json"
 SAMPLE_JOB_PATH = SAMPLES_DIR / "sample_job_admin.json"
 
 
+def _initialize_session_state() -> None:
+    """Initialize upload/paste flow session state keys once."""
+    defaults = {
+        "uploaded_cv_name": "",
+        "uploaded_cv_type": "",
+        "uploaded_cv_size": 0,
+        "extracted_cv_text": "",
+        "extracted_cv_metadata": {},
+        "cv_extraction_result": {},
+        "cv_extraction_status": "",
+        "cv_extraction_errors": [],
+        "pasted_job_text": "",
+        "parsed_candidate_profile": {},
+        "candidate_parse_result": {},
+        "parsed_jd": {},
+        "job_parse_result": {},
+        "analysis_result": {},
+        "analysis_baseline": "",
+        "profile_edited": False,
+        "analysis_stale": False,
+    }
+    for key, default in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
+
+def _clear_downstream_upload_state() -> None:
+    """Clear parser/analysis state that depends on uploaded CV content."""
+    st.session_state["parsed_candidate_profile"] = {}
+    st.session_state["candidate_parse_result"] = {}
+    st.session_state["parsed_jd"] = {}
+    st.session_state["job_parse_result"] = {}
+    st.session_state["analysis_result"] = {}
+    st.session_state["analysis_baseline"] = ""
+    st.session_state["profile_edited"] = False
+    st.session_state["analysis_stale"] = False
+
+
+def _clear_cv_upload_state() -> None:
+    """Clear CV extraction state and downstream upload/paste state."""
+    st.session_state["uploaded_cv_name"] = ""
+    st.session_state["uploaded_cv_type"] = ""
+    st.session_state["uploaded_cv_size"] = 0
+    st.session_state["extracted_cv_text"] = ""
+    st.session_state["extracted_cv_metadata"] = {}
+    st.session_state["cv_extraction_result"] = {}
+    st.session_state["cv_extraction_status"] = ""
+    st.session_state["cv_extraction_errors"] = []
+    _clear_downstream_upload_state()
+
+
 def parse_skill_lines(text: str) -> list[str]:
     """Parse newline or comma-separated skills into a clean list."""
     if not isinstance(text, str):
@@ -268,17 +319,49 @@ def _extract_uploaded_cv_text(uploaded_cv) -> dict:
             Path(temp_path).unlink(missing_ok=True)
 
 
-def _render_uploaded_cv_extraction(uploaded_cv) -> None:
-    """Render safe extracted-text status and preview for an uploaded CV."""
-    st.write("File name:", uploaded_cv.name)
-    st.write("File type:", uploaded_cv.type or "Unknown")
-    st.write("File size:", f"{uploaded_cv.size:,} bytes")
+def _store_cv_extraction_result(uploaded_cv, extraction_result: dict) -> None:
+    """Store upload metadata and extraction result in session state."""
+    st.session_state["uploaded_cv_name"] = uploaded_cv.name
+    st.session_state["uploaded_cv_type"] = uploaded_cv.type or "Unknown"
+    st.session_state["uploaded_cv_size"] = uploaded_cv.size
+    st.session_state["cv_extraction_result"] = extraction_result
+    st.session_state["cv_extraction_status"] = extraction_result.get("status", "")
+    st.session_state["cv_extraction_errors"] = extraction_result.get("errors", [])
 
-    extraction_result = _extract_uploaded_cv_text(uploaded_cv)
-    status = extraction_result.get("status", "")
+    if extraction_result.get("status") == "success":
+        st.session_state["extracted_cv_text"] = extraction_result.get("text", "")
+        st.session_state["extracted_cv_metadata"] = extraction_result.get("metadata", {})
+    else:
+        st.session_state["extracted_cv_text"] = ""
+        st.session_state["extracted_cv_metadata"] = {}
+
+
+def _process_uploaded_cv_if_needed(uploaded_cv) -> None:
+    """Extract a new uploaded CV and update upload-flow state."""
+    previous_name = st.session_state["uploaded_cv_name"]
+    previous_size = st.session_state["uploaded_cv_size"]
+    upload_changed = (
+        uploaded_cv.name != previous_name
+        or uploaded_cv.size != previous_size
+    )
+
+    if upload_changed:
+        _clear_downstream_upload_state()
+
+    if upload_changed or not st.session_state["cv_extraction_result"]:
+        extraction_result = _extract_uploaded_cv_text(uploaded_cv)
+        _store_cv_extraction_result(uploaded_cv, extraction_result)
+
+
+def _render_cv_extraction_state() -> None:
+    """Render safe extracted-text status and preview from session state."""
+    status = st.session_state["cv_extraction_status"]
+    if not status:
+        return
+
     if status == "success":
-        metadata = extraction_result.get("metadata", {})
-        text = extraction_result.get("text", "")
+        metadata = st.session_state["extracted_cv_metadata"]
+        text = st.session_state["extracted_cv_text"]
         st.success("CV text extracted successfully.")
         if metadata.get("detected_extension"):
             st.write("Detected extension:", metadata["detected_extension"])
@@ -292,7 +375,18 @@ def _render_uploaded_cv_extraction(uploaded_cv) -> None:
             )
     else:
         st.error("CV text extraction failed.")
-        st.write(extraction_result.get("errors", []))
+        st.write(st.session_state["cv_extraction_errors"])
+
+
+def _render_uploaded_cv_extraction(uploaded_cv) -> None:
+    """Render safe extracted-text status and preview for an uploaded CV."""
+    _process_uploaded_cv_if_needed(uploaded_cv)
+
+    st.write("File name:", uploaded_cv.name)
+    st.write("File type:", uploaded_cv.type or "Unknown")
+    st.write("File size:", f"{uploaded_cv.size:,} bytes")
+
+    _render_cv_extraction_state()
 
 
 def main() -> None:
@@ -305,6 +399,7 @@ def main() -> None:
         page_icon="\U0001F4C4",
         layout="wide",
     )
+    _initialize_session_state()
     _inject_css()
 
     st.markdown("# UAE CV Builder")
@@ -326,6 +421,8 @@ def main() -> None:
         uploaded_cv = st.file_uploader("Upload your CV", type=["pdf", "docx"])
         if uploaded_cv is not None:
             _render_uploaded_cv_extraction(uploaded_cv)
+        else:
+            _clear_cv_upload_state()
 
     with primary_cols[1]:
         st.markdown('<div class="card-title">Paste full job description</div>', unsafe_allow_html=True)
@@ -340,6 +437,7 @@ def main() -> None:
                 "requirements, qualifications, and skills."
             ),
             height=220,
+            key="pasted_job_text",
         )
 
     st.button("Analyze My CV", type="primary", disabled=True)
