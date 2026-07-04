@@ -11,7 +11,11 @@ from docx import Document
 
 from pypdf import PdfWriter
 
-from engine.resume_text_extractor import extract_text_from_docx, extract_text_from_pdf
+from engine.resume_text_extractor import (
+    extract_resume_text,
+    extract_text_from_docx,
+    extract_text_from_pdf,
+)
 
 
 def write_docx(path: Path, paragraphs: list[str] | None = None) -> None:
@@ -298,3 +302,96 @@ def test_invalid_pdf_returns_failed_result(tmp_path) -> None:
 
     assert result["status"] == "failed"
     assert result["errors"][0].startswith("PDF text extraction failed:")
+
+
+def test_extract_resume_text_routes_docx_successfully(tmp_path) -> None:
+    docx_path = tmp_path / "resume.docx"
+    write_docx(docx_path, ["Sample Candidate", "Administrative Assistant"])
+
+    result = extract_resume_text(str(docx_path))
+
+    assert result["status"] == "success"
+    assert "Sample Candidate" in result["text"]
+    assert "Administrative Assistant" in result["text"]
+    assert result["metadata"]["detected_extension"] == ".docx"
+
+
+def test_extract_resume_text_routes_pdf_successfully(tmp_path) -> None:
+    pdf_path = tmp_path / "resume.pdf"
+    write_text_pdf(pdf_path, [["Sample Candidate", "Microsoft Excel"]])
+
+    result = extract_resume_text(str(pdf_path))
+
+    assert result["status"] == "success"
+    assert "Sample Candidate" in result["text"]
+    assert "Microsoft Excel" in result["text"]
+    assert result["metadata"]["detected_extension"] == ".pdf"
+    assert result["metadata"]["page_count"] == 1
+
+
+def test_extract_resume_text_routes_mixed_case_docx_extension(tmp_path) -> None:
+    docx_path = tmp_path / "resume.DOCX"
+    write_docx(docx_path, ["Sample Candidate"])
+
+    result = extract_resume_text(str(docx_path))
+
+    assert result["status"] == "success"
+    assert "Sample Candidate" in result["text"]
+    assert result["metadata"]["detected_extension"] == ".docx"
+
+
+def test_extract_resume_text_routes_mixed_case_pdf_extension(tmp_path) -> None:
+    pdf_path = tmp_path / "resume.PDF"
+    write_text_pdf(pdf_path, [["Sample Candidate"]])
+
+    result = extract_resume_text(str(pdf_path))
+
+    assert result["status"] == "success"
+    assert "Sample Candidate" in result["text"]
+    assert result["metadata"]["detected_extension"] == ".pdf"
+
+
+def test_extract_resume_text_unsupported_extension_returns_failed(tmp_path) -> None:
+    text_path = tmp_path / "resume.txt"
+    text_path.write_text("Sample Candidate", encoding="utf-8")
+
+    result = extract_resume_text(str(text_path))
+
+    assert result["status"] == "failed"
+    assert result["text"] == ""
+    assert result["errors"] == ["Unsupported resume file extension: .txt."]
+    assert result["warnings"] == []
+
+
+def test_extract_resume_text_empty_file_path_returns_failed() -> None:
+    result = extract_resume_text("")
+
+    assert result["status"] == "failed"
+    assert result["errors"] == ["file_path must be a non-empty string."]
+
+
+def test_extract_resume_text_non_string_file_path_returns_failed() -> None:
+    result = extract_resume_text(Path("resume.docx"))
+
+    assert result["status"] == "failed"
+    assert result["errors"] == ["file_path must be a string."]
+
+
+def test_extract_resume_text_return_shape_matches_contract(tmp_path) -> None:
+    docx_path = tmp_path / "resume.docx"
+    write_docx(docx_path, ["Sample Candidate"])
+
+    result = extract_resume_text(str(docx_path))
+
+    assert set(result) == {"status", "text", "errors", "warnings", "metadata"}
+
+
+def test_extract_resume_text_metadata_contains_facade_fields(tmp_path) -> None:
+    docx_path = tmp_path / "resume.docx"
+    write_docx(docx_path, ["Sample Candidate"])
+
+    result = extract_resume_text(str(docx_path))
+
+    assert result["metadata"]["detected_extension"] == ".docx"
+    assert result["metadata"]["supported_extensions"] == [".docx", ".pdf"]
+    assert result["metadata"]["extractor"] == "resume_text_extractor"

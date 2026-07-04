@@ -21,6 +21,7 @@ EXTRACTOR_METADATA = {
     "version": "v1",
     "source": "uploaded_docx",
 }
+SUPPORTED_EXTENSIONS = [".docx", ".pdf"]
 
 
 def _result(
@@ -162,3 +163,43 @@ def extract_text_from_pdf(file_path: str) -> dict:
         )
 
     return _result("success", text="\n\n".join(page_text), metadata=metadata)
+
+
+def _add_facade_metadata(result: dict, detected_extension: str) -> dict:
+    """Add facade routing metadata without removing extractor metadata."""
+    result["metadata"] = {
+        **result.get("metadata", {}),
+        "detected_extension": detected_extension,
+        "supported_extensions": SUPPORTED_EXTENSIONS.copy(),
+    }
+    return result
+
+
+def extract_resume_text(file_path) -> dict:
+    """Route supported resume files to the matching text extractor."""
+    if not isinstance(file_path, str):
+        return _result("failed", errors=["file_path must be a string."])
+
+    if not file_path:
+        return _result("failed", errors=["file_path must be a non-empty string."])
+
+    detected_extension = Path(file_path).suffix.lower()
+    if detected_extension == ".docx":
+        return _add_facade_metadata(
+            extract_text_from_docx(file_path),
+            detected_extension,
+        )
+    if detected_extension == ".pdf":
+        return _add_facade_metadata(
+            extract_text_from_pdf(file_path),
+            detected_extension,
+        )
+
+    return _result(
+        "failed",
+        errors=[f"Unsupported resume file extension: {detected_extension or '(none)'}."],
+        metadata={
+            "detected_extension": detected_extension,
+            "supported_extensions": SUPPORTED_EXTENSIONS.copy(),
+        },
+    )
