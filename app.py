@@ -6,6 +6,7 @@ Provide a lightweight local demo for resume analysis and DOCX export.
 """
 
 import json
+import tempfile
 from pathlib import Path
 
 try:
@@ -14,6 +15,7 @@ except ModuleNotFoundError:  # Keep helper imports testable when streamlit is un
     st = None
 
 from models.job_description import JobDescription
+from engine.resume_text_extractor import extract_resume_text
 
 
 SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
@@ -252,6 +254,47 @@ def _render_docx_download(final_resume: dict, validation: dict) -> None:
         )
 
 
+def _extract_uploaded_cv_text(uploaded_cv) -> dict:
+    """Extract text from an uploaded CV through a temporary local file."""
+    suffix = Path(uploaded_cv.name).suffix
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(uploaded_cv.getvalue())
+            temp_path = temp_file.name
+        return extract_resume_text(temp_path)
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
+
+
+def _render_uploaded_cv_extraction(uploaded_cv) -> None:
+    """Render safe extracted-text status and preview for an uploaded CV."""
+    st.write("File name:", uploaded_cv.name)
+    st.write("File type:", uploaded_cv.type or "Unknown")
+    st.write("File size:", f"{uploaded_cv.size:,} bytes")
+
+    extraction_result = _extract_uploaded_cv_text(uploaded_cv)
+    status = extraction_result.get("status", "")
+    if status == "success":
+        metadata = extraction_result.get("metadata", {})
+        text = extraction_result.get("text", "")
+        st.success("CV text extracted successfully.")
+        if metadata.get("detected_extension"):
+            st.write("Detected extension:", metadata["detected_extension"])
+        st.write("Character count:", f"{len(text):,}")
+        with st.expander("Extracted text preview", expanded=False):
+            st.text_area(
+                "Extracted CV text",
+                value=text,
+                height=260,
+                disabled=True,
+            )
+    else:
+        st.error("CV text extraction failed.")
+        st.write(extraction_result.get("errors", []))
+
+
 def main() -> None:
     """Render the Streamlit demo UI."""
     if st is None:
@@ -282,9 +325,7 @@ def main() -> None:
         )
         uploaded_cv = st.file_uploader("Upload your CV", type=["pdf", "docx"])
         if uploaded_cv is not None:
-            st.write("File name:", uploaded_cv.name)
-            st.write("File type:", uploaded_cv.type or "Unknown")
-            st.write("File size:", f"{uploaded_cv.size:,} bytes")
+            _render_uploaded_cv_extraction(uploaded_cv)
 
     with primary_cols[1]:
         st.markdown('<div class="card-title">Paste full job description</div>', unsafe_allow_html=True)
@@ -301,12 +342,11 @@ def main() -> None:
             height=220,
         )
 
-    if st.button("Analyze My CV", type="primary"):
-        st.info(
-            "CV upload and full job description parsing are planned for the next "
-            "engine sprints. Use Advanced Demo Mode below to run the current "
-            "structured demo."
-        )
+    st.button("Analyze My CV", type="primary", disabled=True)
+    st.info(
+        "Full analysis from upload will be available after parsing is complete. "
+        "Use Advanced Demo Mode below to run the current structured demo."
+    )
 
     result = None
     with st.expander("Advanced Demo Mode: structured profile analysis", expanded=False):
