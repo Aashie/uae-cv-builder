@@ -19,8 +19,22 @@ PARSER_METADATA = {
 }
 
 SECTION_ALIASES = {
-    "responsibilities": {"responsibilities", "duties"},
-    "requirements": {"requirements", "qualifications"},
+    "responsibilities": {
+        "responsibilities",
+        "duties",
+        "key responsibilities",
+        "job responsibilities",
+        "responsibilities and duties",
+    },
+    "requirements": {
+        "requirements",
+        "qualifications",
+        "requirements and skills",
+        "requirements & skills",
+        "requirements/skills",
+        "requirements and qualifications",
+        "skills and qualifications",
+    },
     "skills": {"skills", "required skills"},
     "preferred_skills": {"preferred skills"},
     "experience": {"experience"},
@@ -88,12 +102,12 @@ def _canonical_heading(line: str) -> str | None:
     stripped = _normalize_item(line).rstrip(":")
     if not stripped:
         return None
-    if len(stripped.split()) > 3:
-        return None
     lowered = stripped.lower()
     for canonical, aliases in SECTION_ALIASES.items():
         if lowered in aliases:
             return canonical
+    if len(stripped.split()) > 3:
+        return None
     return None
 
 
@@ -147,12 +161,38 @@ def _split_skill_item(item: str) -> list[str]:
     return [_normalize_item(piece) for piece in pieces if _normalize_item(piece)]
 
 
+def _append_requirement_skill_phrases(skills: list[str], item: str) -> None:
+    """Append visible requirement skill phrases without inventing content."""
+    for skill in _split_skill_item(item):
+        _append_unique(skills, skill)
+
+    patterns = [
+        r"\bGAAP\b",
+        r"\bFreshBooks\b",
+        r"\bQuickBooks\b",
+        r"\bAdvanced MS Excel\b",
+        r"\bVlookups\b",
+        r"\bpivot tables\b",
+        r"\bgeneral ledger functions\b",
+        r"\battention to detail\b",
+        r"\banalytical skills\b",
+        r"\bAccounting\b",
+        r"\bFinance\b",
+        r"\bCPA\b",
+        r"\bCMA\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, item, flags=re.IGNORECASE)
+        if match:
+            _append_unique(skills, match.group(0))
+
+
 def _extract_required_skills(sections: dict[str, list[str]]) -> list[str]:
     """Extract skills explicitly listed in required/skills sections."""
     skills: list[str] = []
-    for item in sections["skills"]:
-        for skill in _split_skill_item(item):
-            _append_unique(skills, skill)
+    source_items = sections["skills"] if sections["skills"] else sections["requirements"]
+    for item in source_items:
+        _append_requirement_skill_phrases(skills, item)
     return skills
 
 

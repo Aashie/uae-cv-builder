@@ -39,6 +39,44 @@ Bachelor's degree
 """
 
 
+def accountant_jd_without_title() -> str:
+    """Return a common accountant JD without an explicit title line."""
+    return """
+Responsibilities
+Manage all accounting transactions
+Prepare budget forecasts
+Publish financial statements in time
+Reconcile accounts payable and receivable
+Compute taxes and prepare tax returns
+Comply with financial policies and regulations
+
+Requirements and skills
+Work experience as an Accountant
+Excellent knowledge of accounting regulations and procedures, including the Generally Accepted Accounting Principles (GAAP)
+Hands-on experience with accounting software like FreshBooks and QuickBooks
+Advanced MS Excel skills including Vlookups and pivot tables
+Experience with general ledger functions
+Strong attention to detail and good analytical skills
+BSc in Accounting, Finance or relevant degree
+Additional certification (CPA or CMA) is a plus
+"""
+
+
+def flattened_jd_values(result: dict) -> str:
+    """Return searchable parser output text for tests."""
+    job_description = result["job_description"]
+    sections = result["metadata"]["sections"]
+    values = []
+    for value in job_description.values():
+        if isinstance(value, list):
+            values.extend(value)
+        else:
+            values.append(value)
+    for value in sections.values():
+        values.extend(value)
+    return " ".join(str(value) for value in values)
+
+
 def test_valid_sectioned_admin_jd_parses_job_description_payload() -> None:
     result = parse_job_description_text(sectioned_admin_jd())
 
@@ -229,6 +267,77 @@ Required Skills
     assert result["job_description"]["required_skills"] == ["Documentation"]
     assert "Microsoft Excel" not in result["job_description"]["required_skills"]
     assert "Leadership" not in result["job_description"]["required_skills"]
+
+
+def test_responsibilities_and_requirements_skills_heading_extracts_required_skills() -> None:
+    result = parse_job_description_text(accountant_jd_without_title())
+
+    searchable = flattened_jd_values(result)
+    assert result["status"] == "success"
+    assert result["job_description"]["required_skills"] or result["job_description"]["keywords"]
+    assert "Advanced MS Excel" in searchable
+    assert "FreshBooks" in searchable
+    assert "QuickBooks" in searchable
+    assert "general ledger" in searchable
+    assert "analytical skills" in searchable
+    assert "CPA" in searchable
+    assert "CMA" in searchable
+
+
+def test_responsibilities_heading_extracts_responsibilities() -> None:
+    result = parse_job_description_text(accountant_jd_without_title())
+
+    responsibilities = result["metadata"]["sections"]["responsibilities"]
+    assert "Manage all accounting transactions" in responsibilities
+    assert "Prepare budget forecasts" in responsibilities
+    assert "Reconcile accounts payable and receivable" in responsibilities
+
+
+def test_missing_job_title_warns_but_does_not_block_extraction() -> None:
+    result = parse_job_description_text(accountant_jd_without_title())
+
+    assert result["status"] == "success"
+    assert result["job_description"]["job_title"] == ""
+    assert "Job title was not found in pasted job description." in result["warnings"]
+    assert result["job_description"]["required_skills"]
+    assert result["metadata"]["sections"]["responsibilities"]
+
+
+def test_requirements_heading_variants_are_supported() -> None:
+    first = parse_job_description_text(
+        """
+Requirements & Skills
+Advanced MS Excel
+"""
+    )
+    second = parse_job_description_text(
+        """
+Skills and Qualifications
+QuickBooks
+"""
+    )
+
+    assert first["job_description"]["required_skills"]
+    assert second["job_description"]["required_skills"]
+
+
+def test_jd_parser_does_not_invent_title_from_requirements() -> None:
+    result = parse_job_description_text(
+        """
+Requirements and skills
+Work experience as an Accountant
+"""
+    )
+
+    assert result["job_description"]["job_title"] == ""
+
+
+def test_existing_sectioned_jd_text_still_parses() -> None:
+    result = parse_job_description_text(sectioned_admin_jd())
+
+    assert result["status"] == "success"
+    assert result["job_description"]["required_skills"]
+    assert result["metadata"]["sections"]["responsibilities"]
 
 
 def test_return_shape_is_exact() -> None:

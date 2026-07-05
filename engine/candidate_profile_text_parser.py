@@ -27,7 +27,7 @@ PROFILE_KEYS = [
 SECTION_ALIASES = {
     "summary": {"summary", "profile", "professional summary"},
     "contact": {"contact"},
-    "skills": {"skills", "technical skills", "tools"},
+    "skills": {"skills", "technical skills", "tools", "core competencies", "key skills"},
     "experience": {
         "work experience",
         "professional experience",
@@ -35,10 +35,49 @@ SECTION_ALIASES = {
         "experience",
     },
     "education": {"education"},
-    "certifications": {"certifications"},
+    "certifications": {"certifications", "certifications & leadership"},
     "projects": {"projects"},
     "languages": {"languages"},
 }
+
+INLINE_SECTION_HEADINGS = [
+    "CERTIFICATIONS & LEADERSHIP",
+    "PROFESSIONAL EXPERIENCE",
+    "PROFESSIONAL SUMMARY",
+    "TECHNICAL SKILLS",
+    "CORE COMPETENCIES",
+    "WORK EXPERIENCE",
+    "KEY SKILLS",
+    "CERTIFICATIONS",
+    "EXPERIENCE",
+    "EDUCATION",
+    "LANGUAGES",
+    "SKILLS",
+]
+
+TITLE_WORDS = {
+    "administrative",
+    "operations",
+    "executive",
+    "manager",
+    "assistant",
+    "teacher",
+    "engineer",
+    "coordinator",
+    "officer",
+    "specialist",
+    "consultant",
+    "analyst",
+    "developer",
+    "representative",
+    "supervisor",
+    "director",
+    "instructor",
+    "associate",
+    "administrator",
+}
+
+NON_NAME_STARTS = {"curriculum", "resume", "cv", "name", "profile", "summary"}
 
 KNOWN_NAME_HEADINGS = {
     "resume",
@@ -106,9 +145,20 @@ def _normalize_item(text: str) -> str:
     return " ".join(str(text).replace("\xa0", " ").split())
 
 
+def _insert_section_breaks(text: str) -> str:
+    """Add safe line breaks around uppercase section headings and bullets."""
+    prepared = str(text).replace("\xa0", " ")
+    headings = sorted(INLINE_SECTION_HEADINGS, key=len, reverse=True)
+    heading_pattern = "|".join(re.escape(heading) for heading in headings)
+    pattern = re.compile(rf"(?<![A-Za-z])({heading_pattern})(?![A-Za-z])")
+    prepared = pattern.sub(r"\n\1\n", prepared)
+    prepared = re.sub(r"\s+(?=(?:[-*•]|â€¢)\s+)", "\n", prepared)
+    return prepared
+
+
 def _strip_bullet_marker(line: str) -> str:
     """Remove common bullet/list prefixes."""
-    return _normalize_item(re.sub(r"^\s*(?:[-*•]|\d+[\.)])\s+", "", line))
+    return _normalize_item(re.sub(r"^\s*(?:[-*•]|â€¢|\d+[\.)])\s+", "", line))
 
 
 def _canonical_heading(line: str) -> str | None:
@@ -166,6 +216,27 @@ def _is_rejected_name_line(line: str) -> bool:
     )
 
 
+def _extract_inline_uppercase_name(line: str) -> str:
+    """Extract a conservative all-uppercase name from the start of a line."""
+    tokens = re.findall(r"[A-Za-z]+", line)
+    if len(tokens) < 2:
+        return ""
+    if tokens[0].lower() in NON_NAME_STARTS:
+        return ""
+
+    name_tokens: list[str] = []
+    for token in tokens[:4]:
+        if not token.isupper():
+            break
+        if token.lower() in TITLE_WORDS:
+            break
+        name_tokens.append(token)
+
+    if not 2 <= len(name_tokens) <= 4:
+        return ""
+    return " ".join(token.title() for token in name_tokens)
+
+
 def _extract_name(lines: list[str]) -> tuple[str, list[str]]:
     """Extract candidate name from the first meaningful non-heading line."""
     warnings: list[str] = []
@@ -173,6 +244,9 @@ def _extract_name(lines: list[str]) -> tuple[str, list[str]]:
         line = _normalize_item(raw_line)
         if not line:
             continue
+        inline_name = _extract_inline_uppercase_name(line)
+        if inline_name:
+            return inline_name, warnings
         if _is_rejected_name_line(line):
             warnings.append("Candidate name was not found in the first meaningful CV line.")
             return "", warnings
@@ -205,7 +279,7 @@ def _parse_sections(lines: list[str]) -> dict[str, list[str]]:
 
 def _split_list_item(item: str) -> list[str]:
     """Split comma/semicolon separated list items."""
-    pieces = re.split(r"[,;]", item)
+    pieces = re.split(r"[,;](?![^()]*\))", item)
     return [_normalize_item(piece) for piece in pieces if _normalize_item(piece)]
 
 
@@ -213,15 +287,45 @@ def _extract_skills(sections: dict[str, list[str]]) -> list[str]:
     """Extract skills only from explicit skills/technical/tools sections."""
     skills: list[str] = []
     for item in sections["skills"]:
-        for skill in _split_list_item(item):
+        skill_item = item.split(":", 1)[1] if ":" in item else item
+        for skill in _split_list_item(skill_item):
             _append_unique(skills, skill)
     return skills
+
+
+def _looks_like_role_heading(item: str) -> bool:
+    """Return whether an experience line looks like a source role heading."""
+    if "|" in item:
+        return True
+    if re.search(r"\b(?:19|20)\d{2}\b", item) and re.search(r"\s[-–â€“]\s|,", item):
+        return True
+    if re.search(r"\b(?:present|current)\b", item, flags=re.IGNORECASE) and (
+        "," in item or "|" in item or re.search(r"\s[-–â€“]\s", item)
+    ):
+        return True
+    return False
 
 
 def _extract_experience(sections: dict[str, list[str]], skills: list[str]) -> list[dict]:
     """Build sample-compatible experience entries from explicit experience lines."""
     experience: list[dict] = []
-    for index, item in enumerate(sections["experience"], start=1):
+    experience_items = sections["experience"]
+    role_heading_count = sum(1 for item in experience_items if _looks_like_role_heading(item))
+
+    if role_heading_count:
+        role_blocks: list[str] = []
+        current_block: list[str] = []
+        for item in experience_items:
+            if _looks_like_role_heading(item) and current_block:
+                role_blocks.append(" ".join(current_block))
+                current_block = [item]
+            else:
+                current_block.append(item)
+        if current_block:
+            role_blocks.append(" ".join(current_block))
+        experience_items = role_blocks if len(role_blocks) == role_heading_count else [" ".join(experience_items)]
+
+    for index, item in enumerate(experience_items, start=1):
         entry_skills = [
             skill
             for skill in skills
@@ -290,7 +394,8 @@ def parse_candidate_profile_text(cv_text) -> dict:
     if not cv_text.strip():
         return _result("failed", errors=["cv_text must be a non-empty string."])
 
-    lines = cv_text.splitlines()
+    prepared_cv_text = _insert_section_breaks(cv_text)
+    lines = prepared_cv_text.splitlines()
     name, name_warnings = _extract_name(lines)
     sections = _parse_sections(lines)
     skills = _extract_skills(sections)

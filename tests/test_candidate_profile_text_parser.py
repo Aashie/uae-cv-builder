@@ -390,6 +390,134 @@ Professional Experience
     assert "Certified Administrative Professional" not in result["candidate_profile"]["certifications"]
 
 
+def test_real_pdf_inline_headings_extracts_name() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL Administrative & Operations Executive Sharjah, UAE | +971-54-123-4567 PROFESSIONAL SUMMARY Operations-focused administrator.
+"""
+    )
+
+    assert result["status"] == "success"
+    assert result["candidate_profile"]["name"] == "Aashutosh Badal"
+
+
+def test_real_pdf_core_competencies_extracts_skills() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL Administrative & Operations Executive CORE COMPETENCIES
+• Operations: Workflow Optimization, Project Coordination, Logistics Management.
+• Administration: Documentation control, records management, scheduling & reporting
+• Technical: MS Office Suite (Advanced Excel), CRM Tools, Power BI (basic dashboards), data reporting, AI tools for productivity.
+• Digital Marketing: Meta Ads, basic SEO, Google Analytics, content creation (Canva, CapCut)
+• Soft Skills: Stakeholder Communication, Problem-Solving, Team Leadership, Time Management.
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert "Workflow Optimization" in skills
+    assert "Project Coordination" in skills
+    assert "Documentation control" in skills
+    assert "MS Office Suite (Advanced Excel)" in skills
+    assert "CRM Tools" in skills
+    assert "Google Analytics" in skills
+    assert "Stakeholder Communication" in skills
+    assert "Operations:" not in skills
+
+
+def test_real_pdf_professional_experience_extracts_entries() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL PROFESSIONAL EXPERIENCE
+Business Development Executive | Unique Connect, UAE, DEC 2025-Present
+• Represent the StarTrader trading platform.
+Academic & Administrative Coordinator | Scholarshare Education, Nepal 2022 – 2025
+• Coordinated academic administration and student records.
+EDUCATION
+Bachelor of Business Administration
+"""
+    )
+
+    experience = result["candidate_profile"]["experience"]
+    assert len(experience) >= 2
+    assert all(set(entry) == {"id", "text", "skills"} for entry in experience)
+    assert any("Business Development Executive" in entry["text"] for entry in experience)
+    assert any("Academic & Administrative Coordinator" in entry["text"] for entry in experience)
+
+
+def test_real_pdf_certifications_and_leadership_extracts_items() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL CERTIFICATIONS & LEADERSHIP
+• AI and Cybersecurity Seminar (2025)
+• Leadership and Team Management Seminar (2025)
+• Financial Statement Analysis Workshop (2025)
+• Grade A Trekking Guide – NATHM College (2020)
+LANGUAGES
+English: Fluent Nepali: Native Hindi: Fluent
+"""
+    )
+
+    certifications = result["candidate_profile"]["certifications"]
+    assert "AI and Cybersecurity Seminar (2025)" in certifications
+    assert "Leadership and Team Management Seminar (2025)" in certifications
+    assert "Grade A Trekking Guide – NATHM College (2020)" in certifications
+
+
+def test_inline_professional_experience_does_not_create_professional_skill() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL CORE COMPETENCIES • Operations: Workflow Optimization, Project Coordination PROFESSIONAL EXPERIENCE
+Business Development Executive | Unique Connect, UAE, DEC 2025-Present
+• Represent the StarTrader trading platform.
+EDUCATION
+Bachelor of Business Administration
+"""
+    )
+
+    assert "PROFESSIONAL" not in result["candidate_profile"]["skills"]
+    assert "Professional" not in result["candidate_profile"]["skills"]
+    assert "Workflow Optimization" in result["candidate_profile"]["skills"]
+
+
+def test_certifications_and_leadership_does_not_create_leadership_garbage_item() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL CERTIFICATIONS & LEADERSHIP
+• AI and Cybersecurity Seminar (2025)
+• Grade A Trekking Guide – NATHM College (2020)
+LANGUAGES
+English: Fluent
+"""
+    )
+
+    certifications = result["candidate_profile"]["certifications"]
+    assert "& LEADERSHIP" not in certifications
+    assert "AI and Cybersecurity Seminar (2025)" in certifications
+    assert "Grade A Trekking Guide – NATHM College (2020)" in certifications
+
+
+def test_real_pdf_layout_does_not_invent_missing_sections() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL Administrative & Operations Executive PROFESSIONAL SUMMARY Operations-focused administrator.
+"""
+    )
+
+    assert result["candidate_profile"]["skills"] == []
+    assert result["candidate_profile"]["experience"] == []
+    assert result["candidate_profile"]["certifications"] == []
+    assert "Skills section was not found or contained no items." in result["warnings"]
+
+
+def test_existing_docx_style_text_still_parses() -> None:
+    result = parse_candidate_profile_text(sectioned_admin_cv())
+
+    assert result["status"] == "success"
+    assert result["candidate_profile"]["name"] == "Jane Admin"
+    assert "Documentation" in result["candidate_profile"]["skills"]
+    assert result["candidate_profile"]["experience"]
+
+
 def test_return_shape_is_exact() -> None:
     result = parse_candidate_profile_text(sectioned_admin_cv())
 
