@@ -19,6 +19,7 @@ from models.job_description import JobDescription
 from engine.candidate_profile_text_parser import parse_candidate_profile_text
 from engine.job_description_text_parser import parse_job_description_text
 from engine.resume_text_extractor import extract_resume_text
+from engine.section_evidence_trace import build_section_evidence_trace
 from engine.upload_paste_analysis_pipeline import run_upload_paste_analysis
 
 
@@ -65,6 +66,8 @@ def _initialize_session_state() -> None:
         "real_flow_docx_ready": False,
         "real_flow_docx_blockers": [],
         "real_flow_docx_error": "",
+        "real_flow_evidence_trace": {},
+        "real_flow_evidence_trace_error": "",
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -109,6 +112,7 @@ def _clear_upload_analysis_state() -> None:
     st.session_state["analysis_errors"] = []
     st.session_state["analysis_warnings"] = []
     _clear_real_flow_docx_gate_state()
+    _clear_real_flow_evidence_trace_state()
 
 
 def _clear_real_flow_docx_gate_state() -> None:
@@ -116,6 +120,12 @@ def _clear_real_flow_docx_gate_state() -> None:
     st.session_state["real_flow_docx_ready"] = False
     st.session_state["real_flow_docx_blockers"] = []
     st.session_state["real_flow_docx_error"] = ""
+
+
+def _clear_real_flow_evidence_trace_state() -> None:
+    """Clear real-flow section evidence trace state."""
+    st.session_state["real_flow_evidence_trace"] = {}
+    st.session_state["real_flow_evidence_trace_error"] = ""
 
 
 def _clear_candidate_parse_state() -> None:
@@ -866,6 +876,7 @@ def _is_real_flow_analysis_stale() -> bool:
 
 def _run_real_upload_analysis() -> None:
     """Run the real upload/paste analysis flow using the reviewed profile."""
+    _clear_real_flow_evidence_trace_state()
     helper_result = run_upload_paste_analysis(
         st.session_state["extracted_cv_text"],
         st.session_state["pasted_job_text"],
@@ -885,6 +896,21 @@ def _run_real_upload_analysis() -> None:
     else:
         st.session_state["analysis_completed"] = False
     _clear_real_flow_docx_gate_state()
+    if (
+        st.session_state["analysis_completed"]
+        and st.session_state["analysis_result"]
+        and st.session_state["analysis_result"].get("status") not in {"failed", "partial"}
+        and st.session_state["analysis_result"].get("final_resume")
+    ):
+        try:
+            st.session_state["real_flow_evidence_trace"] = build_section_evidence_trace(
+                st.session_state["analysis_result"]["final_resume"],
+                st.session_state["reviewed_candidate_profile"],
+                st.session_state["parsed_jd"],
+            )
+        except Exception as error:
+            st.session_state["real_flow_evidence_trace"] = {}
+            st.session_state["real_flow_evidence_trace_error"] = str(error)
 
 
 def _render_readiness_messages(missing_items: list[str]) -> None:
@@ -930,6 +956,8 @@ def _real_flow_docx_gate(analysis_result: dict) -> tuple[bool, list[str]]:
         blockers.append("Analysis did not complete successfully.")
     if helper_result.get("status") != "success":
         blockers.append("Upload/paste analysis did not complete successfully.")
+    if analysis_result and analysis_result.get("status") in {"failed", "partial"}:
+        blockers.append("Analysis did not complete successfully enough for evidence trace.")
 
     final_resume = analysis_result.get("final_resume") if analysis_result else {}
     validation = analysis_result.get("final_resume_validation") if analysis_result else {}
@@ -941,6 +969,12 @@ def _real_flow_docx_gate(analysis_result: dict) -> tuple[bool, list[str]]:
         blockers.append("Final resume validation failed.")
     if validation and validation.get("errors"):
         blockers.extend(str(error) for error in validation["errors"])
+    if final_resume:
+        evidence_trace = st.session_state["real_flow_evidence_trace"]
+        if not evidence_trace:
+            blockers.append("Section-level evidence trace is missing.")
+        elif evidence_trace.get("status") == "failed":
+            blockers.append("Section-level evidence trace failed.")
 
     return not blockers, blockers
 
@@ -1011,6 +1045,72 @@ def _render_real_flow_download_gate(analysis_result: dict) -> None:
     )
 
 
+def _format_section_title(section_name: str) -> str:
+    """Return a readable evidence trace section title."""
+    titles = {
+        "job_title": "Job title",
+        "professional_summary": "Professional summary",
+        "skills": "Skills",
+        "experience_bullets": "Experience bullets",
+        "metadata_note": "Metadata note",
+    }
+    return titles.get(section_name, section_name.replace("_", " ").title())
+
+
+def _render_section_trace(section_trace: dict) -> None:
+    """Render one section-level evidence trace."""
+    warnings = section_trace.get("warnings", [])
+    if warnings:
+        st.warning(warnings)
+    st.write("Supported:", section_trace.get("supported"))
+    st.write("Support level:", section_trace.get("support_level", ""))
+    st.write("Evidence sources:", section_trace.get("evidence_sources", []))
+    st.write("Evidence items:", section_trace.get("evidence_items", []))
+    if section_trace.get("section") == "skills":
+        st.write("Supported resume skills:", section_trace.get("supported_resume_skills", []))
+        st.write("Unsupported resume skills:", section_trace.get("unsupported_resume_skills", []))
+        st.write("Candidate profile skills:", section_trace.get("candidate_profile_skills", []))
+
+
+def _render_real_flow_evidence_trace(analysis_result: dict) -> None:
+    """Render the real-flow section-level evidence trace."""
+    st.markdown("#### Evidence Trace")
+    st.warning("Section-level evidence trace, not per-claim proof.")
+
+    if analysis_result.get("status") in {"failed", "partial"}:
+        st.info("Evidence trace is not shown because analysis did not complete successfully.")
+        return
+
+    if st.session_state["real_flow_evidence_trace_error"]:
+        st.error("Evidence trace could not be generated.")
+        st.write(st.session_state["real_flow_evidence_trace_error"])
+
+    evidence_trace = st.session_state["real_flow_evidence_trace"]
+    if not evidence_trace:
+        st.info("Evidence trace will appear after a successful analysis with a final resume.")
+        return
+
+    if evidence_trace.get("status") == "failed":
+        st.error("Section-level evidence trace failed.")
+        if evidence_trace.get("errors"):
+            st.write(evidence_trace["errors"])
+        return
+
+    section_traces = evidence_trace.get("section_traces", {})
+    for section_name in (
+        "job_title",
+        "professional_summary",
+        "skills",
+        "experience_bullets",
+        "metadata_note",
+    ):
+        section_trace = section_traces.get(section_name, {})
+        if not section_trace:
+            continue
+        with st.expander(_format_section_title(section_name), expanded=False):
+            _render_section_trace(section_trace)
+
+
 def _render_real_flow_analysis_results() -> None:
     """Render real upload/paste analysis results without DOCX download."""
     st.markdown("### Analysis Results")
@@ -1060,6 +1160,7 @@ def _render_real_flow_analysis_results() -> None:
                 st.json(analysis_result["recommendations"])
         if analysis_result.get("final_resume"):
             _render_resume_preview(analysis_result["final_resume"])
+        _render_real_flow_evidence_trace(analysis_result)
         _render_real_flow_download_gate(analysis_result)
 
 
