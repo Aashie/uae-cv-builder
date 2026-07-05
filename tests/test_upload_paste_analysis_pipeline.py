@@ -88,6 +88,24 @@ def assert_top_level_shape(result: dict) -> None:
     assert set(result) == TOP_LEVEL_KEYS
 
 
+def reviewed_candidate_profile() -> dict:
+    """Return a valid reviewed candidate profile fixture."""
+    return {
+        "name": "Jane Reviewed",
+        "skills": ["Documentation", "Calendar Management"],
+        "experience": [
+            {
+                "id": "exp-1",
+                "text": "Coordinated office documentation.",
+                "skills": [],
+            }
+        ],
+        "projects": [],
+        "certifications": [],
+        "achievements": [],
+    }
+
+
 def test_successful_real_path_helper_result() -> None:
     result = run_upload_paste_analysis(valid_cv_text(), valid_jd_text())
 
@@ -102,6 +120,123 @@ def test_successful_real_path_helper_result() -> None:
         "resume_analysis",
     ]
     assert result["metadata"]["failed_stage"] == ""
+    assert result["metadata"]["candidate_profile_source"] == "parsed"
+
+
+def test_existing_no_argument_path_still_uses_parsed_candidate_profile() -> None:
+    result = run_upload_paste_analysis(valid_cv_text(), valid_jd_text())
+
+    assert result["status"] == "success"
+    assert result["metadata"]["candidate_profile_source"] == "parsed"
+    assert "candidate_profile_parse" in result["metadata"]["completed_stages"]
+    assert "reviewed_candidate_profile" not in result["metadata"]["completed_stages"]
+
+
+def test_reviewed_profile_path_uses_reviewed_profile() -> None:
+    reviewed_profile = reviewed_candidate_profile()
+
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=reviewed_profile,
+    )
+
+    assert result["status"] == "success"
+    assert result["candidate_parse_result"]["candidate_profile"] == reviewed_profile
+    assert result["metadata"]["candidate_profile_source"] == "reviewed"
+    assert "reviewed_candidate_profile" in result["metadata"]["completed_stages"]
+    assert "candidate_profile_parse" not in result["metadata"]["completed_stages"]
+    assert result["analysis_result"]
+
+
+def test_reviewed_profile_path_does_not_add_jd_skills() -> None:
+    reviewed_profile = reviewed_candidate_profile()
+    reviewed_profile["skills"] = ["Documentation"]
+
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=reviewed_profile,
+    )
+
+    candidate_skills = result["candidate_parse_result"]["candidate_profile"]["skills"]
+    assert "Documentation" in candidate_skills
+    assert "Microsoft Excel" not in candidate_skills
+
+
+def test_invalid_reviewed_profile_blocks_analysis() -> None:
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile={},
+    )
+
+    assert result["status"] == "failed"
+    assert result["metadata"]["failed_stage"] == "reviewed_candidate_profile"
+    assert result["analysis_result"] == {}
+    assert result["metadata"]["analysis_ran"] is False
+    assert result["job_parse_result"] == {}
+    assert any("reviewed_candidate_profile" in error for error in result["errors"])
+
+
+def test_non_dict_reviewed_profile_blocks_analysis() -> None:
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=[],
+    )
+
+    assert result["status"] == "failed"
+    assert result["metadata"]["failed_stage"] == "reviewed_candidate_profile"
+    assert result["analysis_result"] == {}
+    assert result["metadata"]["analysis_ran"] is False
+    assert result["job_parse_result"] == {}
+    assert any("reviewed_candidate_profile" in error for error in result["errors"])
+
+
+def test_reviewed_profile_candidate_parse_result_shape() -> None:
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=reviewed_candidate_profile(),
+    )
+    candidate_result = result["candidate_parse_result"]
+
+    assert set(candidate_result) == {
+        "status",
+        "candidate_profile",
+        "errors",
+        "warnings",
+        "metadata",
+    }
+    assert candidate_result["errors"] == []
+    assert candidate_result["warnings"] == []
+    assert candidate_result["metadata"]["source"] == "reviewed_candidate_profile"
+    assert candidate_result["metadata"]["reviewed"] is True
+
+
+def test_reviewed_profile_missing_optional_keys_get_safe_defaults() -> None:
+    reviewed_profile = {
+        "name": "Jane Reviewed",
+        "skills": ["Documentation"],
+    }
+
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=reviewed_profile,
+    )
+
+    normalized_profile = result["candidate_parse_result"]["candidate_profile"]
+    assert result["status"] == "success"
+    assert result["metadata"]["analysis_ran"] is True
+    assert result["analysis_result"]
+    assert normalized_profile["name"] == "Jane Reviewed"
+    assert normalized_profile["skills"] == ["Documentation"]
+    assert normalized_profile["experience"] == []
+    assert normalized_profile["projects"] == []
+    assert normalized_profile["certifications"] == []
+    assert normalized_profile["achievements"] == []
 
 
 def test_candidate_parser_failure_gates_later_stages() -> None:
@@ -159,6 +294,24 @@ def test_analysis_exception_is_caught_safely(monkeypatch) -> None:
     assert any("analysis boom" in error for error in result["errors"])
 
 
+def test_analysis_exception_is_caught_safely_in_reviewed_path(monkeypatch) -> None:
+    def fail_analysis(profile, job_description):
+        raise RuntimeError("analysis boom")
+
+    monkeypatch.setattr(pipeline, "run_resume_analysis", fail_analysis)
+
+    result = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=reviewed_candidate_profile(),
+    )
+
+    assert result["status"] == "failed"
+    assert result["metadata"]["failed_stage"] == "resume_analysis"
+    assert result["metadata"]["analysis_ran"] is False
+    assert any("analysis boom" in error for error in result["errors"])
+
+
 def test_parser_warnings_accumulate_without_blocking_analysis() -> None:
     result = run_upload_paste_analysis(warning_cv_text(), warning_jd_text())
 
@@ -201,4 +354,31 @@ def test_return_shape_on_every_failure_branch(monkeypatch) -> None:
         analysis_failure = run_upload_paste_analysis(valid_cv_text(), valid_jd_text())
 
     for result in [candidate_failure, jd_failure, model_failure, analysis_failure]:
+        assert_top_level_shape(result)
+
+
+def test_return_shape_on_reviewed_success_and_failure_branches(monkeypatch) -> None:
+    reviewed_success = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile=reviewed_candidate_profile(),
+    )
+    invalid_reviewed_failure = run_upload_paste_analysis(
+        valid_cv_text(),
+        valid_jd_text(),
+        reviewed_candidate_profile={},
+    )
+
+    with monkeypatch.context() as patch:
+        def fail_analysis(profile, job_description):
+            raise RuntimeError("analysis boom")
+
+        patch.setattr(pipeline, "run_resume_analysis", fail_analysis)
+        reviewed_analysis_failure = run_upload_paste_analysis(
+            valid_cv_text(),
+            valid_jd_text(),
+            reviewed_candidate_profile=reviewed_candidate_profile(),
+        )
+
+    for result in [reviewed_success, invalid_reviewed_failure, reviewed_analysis_failure]:
         assert_top_level_shape(result)

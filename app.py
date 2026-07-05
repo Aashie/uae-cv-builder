@@ -18,6 +18,7 @@ from models.job_description import JobDescription
 from engine.candidate_profile_text_parser import parse_candidate_profile_text
 from engine.job_description_text_parser import parse_job_description_text
 from engine.resume_text_extractor import extract_resume_text
+from engine.upload_paste_analysis_pipeline import run_upload_paste_analysis
 
 
 SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
@@ -56,6 +57,10 @@ def _initialize_session_state() -> None:
         "review_projects": "",
         "review_certifications": "",
         "review_achievements": "",
+        "upload_pipeline_result": {},
+        "analysis_completed": False,
+        "analysis_errors": [],
+        "analysis_warnings": [],
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -74,6 +79,7 @@ def _clear_downstream_upload_state() -> None:
     st.session_state["analysis_baseline"] = ""
     st.session_state["profile_edited"] = False
     st.session_state["analysis_stale"] = False
+    _clear_upload_analysis_state()
     _clear_candidate_review_state()
 
 
@@ -91,6 +97,15 @@ def _clear_candidate_review_state() -> None:
     st.session_state["profile_edited"] = False
 
 
+def _clear_upload_analysis_state() -> None:
+    """Clear real upload/paste analysis state."""
+    st.session_state["upload_pipeline_result"] = {}
+    st.session_state["analysis_result"] = {}
+    st.session_state["analysis_completed"] = False
+    st.session_state["analysis_errors"] = []
+    st.session_state["analysis_warnings"] = []
+
+
 def _clear_candidate_parse_state() -> None:
     """Clear parsed candidate profile and analysis state."""
     st.session_state["parsed_candidate_profile"] = {}
@@ -100,6 +115,7 @@ def _clear_candidate_parse_state() -> None:
     st.session_state["analysis_baseline"] = ""
     st.session_state["profile_edited"] = False
     st.session_state["analysis_stale"] = False
+    _clear_upload_analysis_state()
     _clear_candidate_review_state()
 
 
@@ -111,6 +127,7 @@ def _clear_job_parse_state() -> None:
     st.session_state["analysis_result"] = {}
     st.session_state["analysis_baseline"] = ""
     st.session_state["analysis_stale"] = False
+    _clear_upload_analysis_state()
 
 
 def _clear_cv_upload_state() -> None:
@@ -688,7 +705,7 @@ def _save_reviewed_candidate_profile() -> None:
     st.session_state["reviewed_candidate_profile"] = _build_reviewed_candidate_profile()
     st.session_state["candidate_review_saved"] = True
     st.session_state["profile_edited"] = True
-    st.session_state["analysis_result"] = {}
+    _clear_upload_analysis_state()
     st.session_state["analysis_baseline"] = ""
     st.session_state["analysis_stale"] = True
 
@@ -757,6 +774,120 @@ def _render_candidate_review_section() -> None:
             st.json(st.session_state["reviewed_candidate_profile"])
 
 
+def _upload_analysis_readiness() -> tuple[bool, list[str]]:
+    """Return whether the real upload/paste analysis flow is ready."""
+    missing: list[str] = []
+    if not st.session_state["extracted_cv_text"]:
+        missing.append("Upload a DOCX or PDF CV.")
+    if not st.session_state["candidate_review_saved"]:
+        missing.append("Save the reviewed candidate profile.")
+    if not isinstance(st.session_state["reviewed_candidate_profile"], dict) or not st.session_state["reviewed_candidate_profile"]:
+        missing.append("Reviewed candidate profile is missing.")
+    if not st.session_state["pasted_job_text"].strip():
+        missing.append("Paste a full job description.")
+    if not st.session_state["job_parse_result"]:
+        missing.append("Preview the parsed job description.")
+    elif st.session_state["job_parse_result"].get("status") != "success":
+        missing.append("Fix job description parsing errors.")
+    if not st.session_state["parsed_jd"]:
+        missing.append("Parsed job description is missing.")
+    return not missing, missing
+
+
+def _run_real_upload_analysis() -> None:
+    """Run the real upload/paste analysis flow using the reviewed profile."""
+    helper_result = run_upload_paste_analysis(
+        st.session_state["extracted_cv_text"],
+        st.session_state["pasted_job_text"],
+        reviewed_candidate_profile=st.session_state["reviewed_candidate_profile"],
+    )
+    st.session_state["upload_pipeline_result"] = helper_result
+    st.session_state["analysis_result"] = helper_result.get("analysis_result", {})
+    st.session_state["analysis_errors"] = helper_result.get("errors", [])
+    st.session_state["analysis_warnings"] = helper_result.get("warnings", [])
+    st.session_state["analysis_completed"] = (
+        helper_result.get("status") == "success"
+        and bool(helper_result.get("analysis_result"))
+    )
+    if st.session_state["analysis_completed"]:
+        st.session_state["analysis_stale"] = False
+
+
+def _render_readiness_messages(missing_items: list[str]) -> None:
+    """Render short readiness guidance."""
+    if not missing_items:
+        st.success("Ready to analyze the reviewed profile against the pasted job description.")
+        return
+    st.info("Complete these steps before analysis:")
+    for item in missing_items:
+        st.write(f"- {item}")
+
+
+def _render_analysis_internal_messages(analysis_result: dict) -> None:
+    """Render internal analysis status and failure-safety details honestly."""
+    if analysis_result.get("status"):
+        st.write("Internal analysis status:", analysis_result["status"])
+    if analysis_result.get("failed_stage"):
+        st.write("Failed stage:", analysis_result["failed_stage"])
+    if analysis_result.get("errors"):
+        st.write("Analysis errors:", analysis_result["errors"])
+    if analysis_result.get("completed_stages"):
+        with st.expander("Completed analysis stages", expanded=False):
+            st.write(analysis_result["completed_stages"])
+    validation = analysis_result.get("final_resume_validation")
+    if validation:
+        validation_label = "Valid" if validation.get("is_valid") else "Needs review"
+        st.write("Final resume validation:", validation_label)
+        if validation.get("errors"):
+            st.write(validation["errors"])
+
+
+def _render_real_flow_analysis_results() -> None:
+    """Render real upload/paste analysis results without DOCX download."""
+    st.markdown("### Analysis Results")
+    helper_result = st.session_state["upload_pipeline_result"]
+    analysis_result = st.session_state["analysis_result"]
+
+    if not helper_result and not analysis_result:
+        st.info("Run analysis after reviewing your profile and job description.")
+        return
+
+    if helper_result and helper_result.get("status") == "failed":
+        st.error("Upload/paste analysis failed.")
+        st.write(helper_result.get("errors", []))
+        return
+
+    if st.session_state["analysis_warnings"]:
+        st.warning(st.session_state["analysis_warnings"])
+
+    if analysis_result:
+        _render_analysis_internal_messages(analysis_result)
+        if analysis_result.get("matched_skills") or analysis_result.get("missing_skills"):
+            skill_cols = st.columns(2)
+            with skill_cols[0]:
+                _render_tags(
+                    "Matched skills",
+                    analysis_result.get("matched_skills", []),
+                    "green",
+                    "No matched skills returned.",
+                )
+            with skill_cols[1]:
+                _render_tags(
+                    "Missing skills",
+                    analysis_result.get("missing_skills", []),
+                    "red",
+                    "No missing skills returned.",
+                )
+        if analysis_result.get("skill_gaps"):
+            with st.expander("Skill gap summary", expanded=False):
+                st.json(analysis_result["skill_gaps"])
+        if analysis_result.get("recommendations"):
+            with st.expander("Recommendations", expanded=False):
+                st.json(analysis_result["recommendations"])
+        if analysis_result.get("final_resume"):
+            _render_resume_preview(analysis_result["final_resume"])
+
+
 def main() -> None:
     """Render the Streamlit demo UI."""
     if st is None:
@@ -811,11 +942,16 @@ def main() -> None:
     _render_parsed_preview_before_analysis()
     _render_candidate_review_section()
 
-    st.button("Analyze My CV", type="primary", disabled=True)
+    ready_to_analyze, missing_readiness_items = _upload_analysis_readiness()
+    _render_readiness_messages(missing_readiness_items)
+    if st.button("Analyze My CV", type="primary", disabled=not ready_to_analyze):
+        _run_real_upload_analysis()
     st.info(
-        "Full analysis will be enabled after parsed profile review/edit is complete. "
-        "Use Advanced Demo Mode below to run the current structured demo."
+        "Real upload-based analysis is now enabled after you save the reviewed profile "
+        "and paste a valid job description. DOCX download from the real upload flow "
+        "will be enabled after the safety and stale-validation sprint."
     )
+    _render_real_flow_analysis_results()
 
     result = None
     with st.expander("Advanced Demo Mode: structured profile analysis", expanded=False):
