@@ -6,6 +6,7 @@ Provide a lightweight local demo for resume analysis and DOCX export.
 """
 
 import json
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -61,6 +62,9 @@ def _initialize_session_state() -> None:
         "analysis_completed": False,
         "analysis_errors": [],
         "analysis_warnings": [],
+        "real_flow_docx_ready": False,
+        "real_flow_docx_blockers": [],
+        "real_flow_docx_error": "",
     }
     for key, default in defaults.items():
         if key not in st.session_state:
@@ -104,6 +108,14 @@ def _clear_upload_analysis_state() -> None:
     st.session_state["analysis_completed"] = False
     st.session_state["analysis_errors"] = []
     st.session_state["analysis_warnings"] = []
+    _clear_real_flow_docx_gate_state()
+
+
+def _clear_real_flow_docx_gate_state() -> None:
+    """Clear real-flow DOCX gate state."""
+    st.session_state["real_flow_docx_ready"] = False
+    st.session_state["real_flow_docx_blockers"] = []
+    st.session_state["real_flow_docx_error"] = ""
 
 
 def _clear_candidate_parse_state() -> None:
@@ -702,12 +714,16 @@ def _build_reviewed_candidate_profile() -> dict:
 
 def _save_reviewed_candidate_profile() -> None:
     """Persist the reviewed candidate profile for future analysis integration."""
+    had_analysis = bool(
+        st.session_state["analysis_result"]
+        or st.session_state["upload_pipeline_result"]
+    )
     st.session_state["reviewed_candidate_profile"] = _build_reviewed_candidate_profile()
     st.session_state["candidate_review_saved"] = True
     st.session_state["profile_edited"] = True
     _clear_upload_analysis_state()
     st.session_state["analysis_baseline"] = ""
-    st.session_state["analysis_stale"] = True
+    st.session_state["analysis_stale"] = had_analysis
 
 
 def _render_candidate_review_section() -> None:
@@ -794,6 +810,60 @@ def _upload_analysis_readiness() -> tuple[bool, list[str]]:
     return not missing, missing
 
 
+def _normalize_for_baseline(payload):
+    """Normalize profile-like payloads for deterministic baseline hashing."""
+    if isinstance(payload, str):
+        return payload.strip()
+    if isinstance(payload, list):
+        normalized_items = [
+            _normalize_for_baseline(item)
+            for item in payload
+        ]
+        normalized_items = [
+            item for item in normalized_items
+            if not (isinstance(item, str) and not item)
+        ]
+        if all(not isinstance(item, (dict, list)) for item in normalized_items):
+            return sorted(normalized_items, key=lambda item: json.dumps(item, default=str))
+        return sorted(
+            normalized_items,
+            key=lambda item: json.dumps(item, sort_keys=True, default=str),
+        )
+    if isinstance(payload, dict):
+        return {
+            key: _normalize_for_baseline(value)
+            for key, value in payload.items()
+        }
+    return payload
+
+
+def _stable_json_signature(payload) -> str:
+    """Return a SHA-256 signature for a JSON-serializable payload."""
+    serialized = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _current_upload_analysis_baseline() -> str:
+    """Return the current real-flow input baseline signature."""
+    baseline_payload = {
+        "extracted_cv_text": st.session_state["extracted_cv_text"],
+        "reviewed_candidate_profile": _normalize_for_baseline(
+            st.session_state["reviewed_candidate_profile"],
+        ),
+        "pasted_job_text": st.session_state["pasted_job_text"],
+    }
+    return _stable_json_signature(baseline_payload)
+
+
+def _is_real_flow_analysis_stale() -> bool:
+    """Return whether current real-flow inputs differ from analyzed baseline."""
+    return (
+        st.session_state["analysis_completed"] is True
+        and bool(st.session_state["analysis_baseline"])
+        and _current_upload_analysis_baseline() != st.session_state["analysis_baseline"]
+    )
+
+
 def _run_real_upload_analysis() -> None:
     """Run the real upload/paste analysis flow using the reviewed profile."""
     helper_result = run_upload_paste_analysis(
@@ -810,7 +880,11 @@ def _run_real_upload_analysis() -> None:
         and bool(helper_result.get("analysis_result"))
     )
     if st.session_state["analysis_completed"]:
+        st.session_state["analysis_baseline"] = _current_upload_analysis_baseline()
         st.session_state["analysis_stale"] = False
+    else:
+        st.session_state["analysis_completed"] = False
+    _clear_real_flow_docx_gate_state()
 
 
 def _render_readiness_messages(missing_items: list[str]) -> None:
@@ -842,6 +916,101 @@ def _render_analysis_internal_messages(analysis_result: dict) -> None:
             st.write(validation["errors"])
 
 
+def _real_flow_docx_gate(analysis_result: dict) -> tuple[bool, list[str]]:
+    """Return whether real-flow DOCX download may be generated."""
+    blockers: list[str] = []
+    helper_result = st.session_state["upload_pipeline_result"]
+    stale = st.session_state["analysis_stale"] or _is_real_flow_analysis_stale()
+
+    if not analysis_result:
+        blockers.append("Run analysis before downloading.")
+    if stale:
+        blockers.append("Analysis is stale. Re-run analysis before downloading.")
+    if not st.session_state["analysis_completed"]:
+        blockers.append("Analysis did not complete successfully.")
+    if helper_result.get("status") != "success":
+        blockers.append("Upload/paste analysis did not complete successfully.")
+
+    final_resume = analysis_result.get("final_resume") if analysis_result else {}
+    validation = analysis_result.get("final_resume_validation") if analysis_result else {}
+    if not final_resume:
+        blockers.append("Final resume is missing.")
+    if not validation:
+        blockers.append("Final resume validation is missing.")
+    elif validation.get("is_valid") is not True:
+        blockers.append("Final resume validation failed.")
+    if validation and validation.get("errors"):
+        blockers.extend(str(error) for error in validation["errors"])
+
+    return not blockers, blockers
+
+
+def _build_real_flow_docx_bytes(final_resume: dict) -> bytes | None:
+    """Build DOCX bytes for a validated real-flow final resume."""
+    from engine.docx_exporter import export_resume_to_docx
+    from engine.resume_export_adapter import build_resume_export_payload
+
+    export_payload = build_resume_export_payload(final_resume)
+    if export_payload.get("status") != "success":
+        st.session_state["real_flow_docx_error"] = "; ".join(
+            str(error) for error in export_payload.get("errors", [])
+        )
+        return None
+
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".docx") as temp_file:
+            temp_path = temp_file.name
+        export_result = export_resume_to_docx(export_payload, temp_path)
+        if export_result.get("status") != "success":
+            st.session_state["real_flow_docx_error"] = "; ".join(
+                str(error) for error in export_result.get("errors", [])
+            )
+            return None
+        return Path(temp_path).read_bytes()
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
+
+
+def _render_real_flow_download_gate(analysis_result: dict) -> None:
+    """Render real-flow DOCX download safety check and button when safe."""
+    st.markdown("#### Download Safety Check")
+    can_download, blockers = _real_flow_docx_gate(analysis_result)
+    st.session_state["real_flow_docx_ready"] = can_download
+    st.session_state["real_flow_docx_blockers"] = blockers
+
+    if blockers:
+        st.warning("Reviewed resume DOCX download is blocked.")
+        for blocker in blockers:
+            st.write(f"- {blocker}")
+        return
+
+    try:
+        docx_bytes = _build_real_flow_docx_bytes(analysis_result["final_resume"])
+    except Exception as error:
+        st.session_state["real_flow_docx_ready"] = False
+        st.session_state["real_flow_docx_error"] = str(error)
+        st.error("DOCX export is currently blocked because export generation failed.")
+        st.write(st.session_state["real_flow_docx_error"])
+        return
+
+    if not docx_bytes:
+        st.session_state["real_flow_docx_ready"] = False
+        st.error("DOCX export is currently blocked because export generation failed.")
+        if st.session_state["real_flow_docx_error"]:
+            st.write(st.session_state["real_flow_docx_error"])
+        return
+
+    st.success("Download safety checks passed.")
+    st.download_button(
+        "Download Reviewed Resume DOCX",
+        data=docx_bytes,
+        file_name="reviewed_resume.docx",
+        mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
 def _render_real_flow_analysis_results() -> None:
     """Render real upload/paste analysis results without DOCX download."""
     st.markdown("### Analysis Results")
@@ -861,6 +1030,11 @@ def _render_real_flow_analysis_results() -> None:
         st.warning(st.session_state["analysis_warnings"])
 
     if analysis_result:
+        if st.session_state["analysis_stale"] or _is_real_flow_analysis_stale():
+            st.warning(
+                "This analysis is stale because the CV, reviewed profile, or job "
+                "description changed. Re-run analysis before downloading."
+            )
         _render_analysis_internal_messages(analysis_result)
         if analysis_result.get("matched_skills") or analysis_result.get("missing_skills"):
             skill_cols = st.columns(2)
@@ -886,6 +1060,7 @@ def _render_real_flow_analysis_results() -> None:
                 st.json(analysis_result["recommendations"])
         if analysis_result.get("final_resume"):
             _render_resume_preview(analysis_result["final_resume"])
+        _render_real_flow_download_gate(analysis_result)
 
 
 def main() -> None:
@@ -949,7 +1124,7 @@ def main() -> None:
     st.info(
         "Real upload-based analysis is now enabled after you save the reviewed profile "
         "and paste a valid job description. DOCX download from the real upload flow "
-        "will be enabled after the safety and stale-validation sprint."
+        "appears only after safety and stale-validation checks pass."
     )
     _render_real_flow_analysis_results()
 
