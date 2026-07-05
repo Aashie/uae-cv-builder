@@ -277,6 +277,35 @@ def _render_tags(title: str, values: list[str], style: str, empty_message: str) 
         st.caption(empty_message)
 
 
+def _message_items(messages) -> list[str]:
+    """Return non-empty display messages from strings or simple collections."""
+    if not messages:
+        return []
+    if isinstance(messages, str):
+        return [messages] if messages.strip() else []
+    if isinstance(messages, (list, tuple, set)):
+        items: list[str] = []
+        for message in messages:
+            items.extend(_message_items(message))
+        return items
+    return [str(messages)]
+
+
+def _render_message_list(title: str, messages, level: str = "info") -> None:
+    """Render user-facing messages line by line."""
+    items = _message_items(messages)
+    if not items:
+        return
+    if level == "warning":
+        st.warning(title)
+    elif level == "error":
+        st.error(title)
+    else:
+        st.info(title)
+    for item in items:
+        st.write(f"- {item}")
+
+
 def _render_analysis_result(result: dict) -> None:
     """Render key analysis outputs."""
     status = result.get("status", "")
@@ -315,7 +344,7 @@ def _render_analysis_result(result: dict) -> None:
 
     if result.get("errors"):
         with st.expander("Pipeline messages", expanded=status in {"partial", "failed"}):
-            st.write(result["errors"])
+            _render_message_list("Pipeline errors:", result["errors"], level="error")
             if result.get("failed_stage"):
                 st.write("Failed stage:", result["failed_stage"])
             if result.get("completed_stages"):
@@ -366,7 +395,7 @@ def _render_docx_download(final_resume: dict, validation: dict) -> None:
     st.markdown("### DOCX Export")
     if not validation.get("is_valid"):
         st.error("Final resume validation failed. DOCX export was not generated.")
-        st.write(validation.get("errors", []))
+        _render_message_list("Final resume validation errors:", validation.get("errors", []), level="error")
         return
 
     from engine.docx_exporter import export_resume_to_docx
@@ -375,16 +404,14 @@ def _render_docx_download(final_resume: dict, validation: dict) -> None:
     export_payload = build_resume_export_payload(final_resume)
     st.write("Export payload status:", export_payload.get("status", ""))
     if export_payload.get("status") != "success":
-        st.error("Export payload generation failed.")
-        st.write(export_payload.get("errors", []))
+        _render_message_list("Export payload generation failed:", export_payload.get("errors", []), level="error")
         return
 
     exports_dir = Path("exports")
     output_path = exports_dir / "uae_cv_builder_demo.docx"
     export_result = export_resume_to_docx(export_payload, str(output_path))
     if export_result.get("status") != "success":
-        st.error("DOCX export failed.")
-        st.write(export_result.get("errors", []))
+        _render_message_list("DOCX export failed:", export_result.get("errors", []), level="error")
         return
 
     with open(output_path, "rb") as docx_file:
@@ -470,7 +497,7 @@ def _render_cv_extraction_state() -> None:
             )
     else:
         st.error("CV text extraction failed.")
-        st.write(st.session_state["cv_extraction_errors"])
+        _render_message_list("CV text extraction errors:", st.session_state["cv_extraction_errors"], level="error")
 
 
 def _render_uploaded_cv_extraction(uploaded_cv) -> None:
@@ -531,12 +558,12 @@ def _parse_job_description_if_needed() -> None:
     st.session_state["job_parse_source_text"] = job_text
 
 
-def _render_parser_messages(parse_result: dict) -> None:
+def _render_parser_messages(parse_result: dict, label: str = "Parser") -> None:
     """Render parser warnings and errors."""
     if parse_result.get("warnings"):
-        st.warning(parse_result["warnings"])
+        _render_message_list(f"{label} warnings:", parse_result["warnings"], level="warning")
     if parse_result.get("errors"):
-        st.write(parse_result["errors"])
+        _render_message_list(f"{label} errors:", parse_result["errors"], level="error")
 
 
 def _render_candidate_profile_preview() -> None:
@@ -561,7 +588,7 @@ def _render_candidate_profile_preview() -> None:
             st.json(profile)
     else:
         st.error("Candidate profile parsing failed.")
-    _render_parser_messages(parse_result)
+    _render_parser_messages(parse_result, label="Candidate parser")
 
 
 def _render_job_description_preview() -> None:
@@ -585,7 +612,7 @@ def _render_job_description_preview() -> None:
             st.json(parsed_jd)
     else:
         st.error("Job description parsing failed.")
-    _render_parser_messages(parse_result)
+    _render_parser_messages(parse_result, label="Job parser")
 
 
 def _render_parsed_preview_before_analysis() -> None:
@@ -595,8 +622,8 @@ def _render_parsed_preview_before_analysis() -> None:
 
     st.markdown("### Parsed Preview Before Analysis")
     st.caption(
-        "Review what the system extracted. Full analysis will be enabled after "
-        "the review/edit step."
+        "Review what the system extracted. Save the reviewed profile and paste "
+        "a valid job description to run analysis."
     )
     preview_cols = st.columns(2)
     with preview_cols[0]:
@@ -795,7 +822,7 @@ def _render_candidate_review_section() -> None:
 
     if st.session_state["candidate_review_saved"]:
         st.success("Reviewed candidate profile saved.")
-        st.info("Analysis is still disabled until the next integration sprint.")
+        st.info("Reviewed profile is saved. Analysis becomes available once a valid job description is parsed.")
         with st.expander("Reviewed candidate profile", expanded=False):
             st.json(st.session_state["reviewed_candidate_profile"])
 
@@ -930,7 +957,7 @@ def _render_analysis_internal_messages(analysis_result: dict) -> None:
     if analysis_result.get("failed_stage"):
         st.write("Failed stage:", analysis_result["failed_stage"])
     if analysis_result.get("errors"):
-        st.write("Analysis errors:", analysis_result["errors"])
+        _render_message_list("Analysis errors:", analysis_result["errors"], level="error")
     if analysis_result.get("completed_stages"):
         with st.expander("Completed analysis stages", expanded=False):
             st.write(analysis_result["completed_stages"])
@@ -939,7 +966,7 @@ def _render_analysis_internal_messages(analysis_result: dict) -> None:
         validation_label = "Valid" if validation.get("is_valid") else "Needs review"
         st.write("Final resume validation:", validation_label)
         if validation.get("errors"):
-            st.write(validation["errors"])
+            _render_message_list("Final resume validation errors:", validation["errors"], level="error")
 
 
 def _real_flow_docx_gate(analysis_result: dict) -> tuple[bool, list[str]]:
@@ -1015,9 +1042,7 @@ def _render_real_flow_download_gate(analysis_result: dict) -> None:
     st.session_state["real_flow_docx_blockers"] = blockers
 
     if blockers:
-        st.warning("Reviewed resume DOCX download is blocked.")
-        for blocker in blockers:
-            st.write(f"- {blocker}")
+        _render_message_list("Reviewed resume DOCX download is blocked.", blockers, level="warning")
         return
 
     try:
@@ -1061,7 +1086,7 @@ def _render_section_trace(section_trace: dict) -> None:
     """Render one section-level evidence trace."""
     warnings = section_trace.get("warnings", [])
     if warnings:
-        st.warning(warnings)
+        _render_message_list("Trace warnings:", warnings, level="warning")
     st.write("Supported:", section_trace.get("supported"))
     st.write("Support level:", section_trace.get("support_level", ""))
     st.write("Evidence sources:", section_trace.get("evidence_sources", []))
@@ -1093,7 +1118,7 @@ def _render_real_flow_evidence_trace(analysis_result: dict) -> None:
     if evidence_trace.get("status") == "failed":
         st.error("Section-level evidence trace failed.")
         if evidence_trace.get("errors"):
-            st.write(evidence_trace["errors"])
+            _render_message_list("Evidence trace errors:", evidence_trace["errors"], level="error")
         return
 
     section_traces = evidence_trace.get("section_traces", {})
@@ -1122,12 +1147,11 @@ def _render_real_flow_analysis_results() -> None:
         return
 
     if helper_result and helper_result.get("status") == "failed":
-        st.error("Upload/paste analysis failed.")
-        st.write(helper_result.get("errors", []))
+        _render_message_list("Upload/paste analysis failed.", helper_result.get("errors", []), level="error")
         return
 
     if st.session_state["analysis_warnings"]:
-        st.warning(st.session_state["analysis_warnings"])
+        _render_message_list("Analysis warnings:", st.session_state["analysis_warnings"], level="warning")
 
     if analysis_result:
         if st.session_state["analysis_stale"] or _is_real_flow_analysis_stale():
@@ -1190,7 +1214,7 @@ def main() -> None:
     with primary_cols[0]:
         st.markdown('<div class="card-title">Upload your CV</div>', unsafe_allow_html=True)
         st.markdown(
-            '<div class="card-subtitle">Upload your existing CV. The system will eventually extract only information present in your document.</div>',
+            '<div class="card-subtitle">Upload your existing CV. The system extracts text and uses only reviewed candidate information for analysis.</div>',
             unsafe_allow_html=True,
         )
         uploaded_cv = st.file_uploader("Upload your CV", type=["pdf", "docx"])
@@ -1223,9 +1247,9 @@ def main() -> None:
     if st.button("Analyze My CV", type="primary", disabled=not ready_to_analyze):
         _run_real_upload_analysis()
     st.info(
-        "Real upload-based analysis is now enabled after you save the reviewed profile "
-        "and paste a valid job description. DOCX download from the real upload flow "
-        "appears only after safety and stale-validation checks pass."
+        "Real upload-based analysis is available after you save the reviewed profile "
+        "and paste a valid job description. DOCX download appears only after safety "
+        "and stale-validation checks pass."
     )
     _render_real_flow_analysis_results()
 
