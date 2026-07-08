@@ -514,6 +514,14 @@ def _render_uploaded_cv_extraction(uploaded_cv) -> None:
 def _parse_candidate_profile_if_needed() -> None:
     """Parse extracted CV text for preview when source text changes."""
     cv_text = st.session_state["extracted_cv_text"]
+    expected_keys = {
+        "name",
+        "skills",
+        "experience",
+        "projects",
+        "certifications",
+        "achievements",
+    }
     if not cv_text:
         st.session_state["parsed_candidate_profile"] = {}
         return
@@ -522,15 +530,35 @@ def _parse_candidate_profile_if_needed() -> None:
         st.session_state["candidate_parse_result"]
         and st.session_state["candidate_parse_source_text"] == cv_text
     ):
+        cached_profile = st.session_state["candidate_parse_result"].get(
+            "candidate_profile",
+            {},
+        )
+        if (
+            st.session_state["candidate_parse_result"].get("status") == "success"
+            and not st.session_state["parsed_candidate_profile"]
+            and isinstance(cached_profile, dict)
+            and cached_profile
+            and expected_keys.issubset(cached_profile)
+        ):
+            st.session_state["parsed_candidate_profile"] = cached_profile
         return
 
     parse_result = parse_candidate_profile_text(cv_text)
     st.session_state["candidate_parse_result"] = parse_result
     if parse_result.get("status") == "success":
-        st.session_state["parsed_candidate_profile"] = parse_result.get(
+        candidate_profile = parse_result.get(
             "candidate_profile",
             {},
         )
+        if (
+            isinstance(candidate_profile, dict)
+            and candidate_profile
+            and expected_keys.issubset(candidate_profile)
+        ):
+            st.session_state["parsed_candidate_profile"] = candidate_profile
+        else:
+            st.session_state["parsed_candidate_profile"] = {}
     else:
         st.session_state["parsed_candidate_profile"] = {}
     st.session_state["candidate_parse_source_text"] = cv_text
@@ -547,12 +575,24 @@ def _parse_job_description_if_needed() -> None:
         st.session_state["job_parse_result"]
         and st.session_state["job_parse_source_text"] == job_text
     ):
+        cached_jd = st.session_state["job_parse_result"].get("job_description", {})
+        if (
+            st.session_state["job_parse_result"].get("status") == "success"
+            and not st.session_state["parsed_jd"]
+            and isinstance(cached_jd, dict)
+            and cached_jd
+        ):
+            st.session_state["parsed_jd"] = cached_jd
         return
 
     parse_result = parse_job_description_text(job_text)
     st.session_state["job_parse_result"] = parse_result
     if parse_result.get("status") == "success":
-        st.session_state["parsed_jd"] = parse_result.get("job_description", {})
+        job_description = parse_result.get("job_description", {})
+        if isinstance(job_description, dict) and job_description:
+            st.session_state["parsed_jd"] = job_description
+        else:
+            st.session_state["parsed_jd"] = {}
     else:
         st.session_state["parsed_jd"] = {}
     st.session_state["job_parse_source_text"] = job_text
@@ -730,6 +770,14 @@ def _build_reviewed_experience(lines: list[str], original_entries: list) -> list
 
 def _build_reviewed_candidate_profile() -> dict:
     """Build a reviewed candidate profile from review form fields."""
+    profile_keys = (
+        "name",
+        "skills",
+        "experience",
+        "projects",
+        "certifications",
+        "achievements",
+    )
     parsed_profile = st.session_state["parsed_candidate_profile"]
     original_profile = (
         st.session_state["reviewed_candidate_profile"]
@@ -746,7 +794,7 @@ def _build_reviewed_candidate_profile() -> dict:
         "certifications": _review_lines(st.session_state["review_certifications"]),
         "achievements": _review_lines(st.session_state["review_achievements"]),
     }
-    return {key: reviewed.get(key, []) for key in parsed_profile}
+    return {key: reviewed.get(key, [] if key != "name" else "") for key in profile_keys}
 
 
 def _save_reviewed_candidate_profile() -> None:
@@ -755,7 +803,15 @@ def _save_reviewed_candidate_profile() -> None:
         st.session_state["analysis_result"]
         or st.session_state["upload_pipeline_result"]
     )
-    st.session_state["reviewed_candidate_profile"] = _build_reviewed_candidate_profile()
+    reviewed_profile = _build_reviewed_candidate_profile()
+    has_reviewed_content = any(bool(reviewed_profile.get(key)) for key in reviewed_profile)
+    if not has_reviewed_content:
+        st.session_state["reviewed_candidate_profile"] = {}
+        st.session_state["candidate_review_saved"] = False
+        st.session_state["profile_edited"] = False
+        st.error("Reviewed candidate profile could not be saved because it is empty.")
+        return
+    st.session_state["reviewed_candidate_profile"] = reviewed_profile
     st.session_state["candidate_review_saved"] = True
     st.session_state["profile_edited"] = True
     _clear_upload_analysis_state()
