@@ -1309,13 +1309,13 @@ def main() -> None:
     )
     _render_real_flow_analysis_results()
 
-    result = None
     with st.expander("Developer Sample Mode: structured profile analysis", expanded=False):
         st.info(
             "Developer Sample Mode uses built-in sample data for testing the interface. "
             "It does not analyze your uploaded CV and does not affect the real Upload "
             "CV + Paste JD analysis above."
         )
+        sample_result = None
         defaults = get_default_job_values()
         input_cols = st.columns(2)
 
@@ -1366,17 +1366,19 @@ def main() -> None:
                 }
             )
             with st.spinner("Running evidence-based analysis..."):
-                result = run_pipeline(profile, job_description)
+                sample_result = run_pipeline(profile, job_description)
 
-    if result:
-        _render_analysis_result(result)
-        final_resume = result.get("final_resume", {})
-        if final_resume:
-            _render_resume_preview(final_resume)
-            _render_docx_download(
-                final_resume,
-                result.get("final_resume_validation", {}),
+        if sample_result:
+            st.markdown("### Developer Sample Results")
+            st.info(
+                "These results are generated from built-in sample data for "
+                "development testing only. DOCX export is intentionally disabled "
+                "in Developer Sample Mode."
             )
+            _render_analysis_result(sample_result)
+            final_resume = sample_result.get("final_resume", {})
+            if final_resume:
+                _render_resume_preview(final_resume)
 
 
 if __name__ == "__main__":
