@@ -1254,7 +1254,12 @@ def main() -> None:
     _render_real_flow_analysis_results()
 
     result = None
-    with st.expander("Advanced Demo Mode: structured profile analysis", expanded=False):
+    with st.expander("Developer Sample Mode: structured profile analysis", expanded=False):
+        st.info(
+            "Developer Sample Mode uses built-in sample data for testing the interface. "
+            "It does not analyze your uploaded CV and does not affect the real Upload "
+            "CV + Paste JD analysis above."
+        )
         defaults = get_default_job_values()
         input_cols = st.columns(2)
 
