@@ -131,3 +131,88 @@ def test_duplicate_required_and_evidence_skills_are_removed() -> None:
     assert result["missing_skills"] == []
     assert result["evidence_matches"] == {"SQL": ["ev-1"]}
     assert result["score"] == 100
+
+
+def test_ms_office_requirement_matches_specific_candidate_office_skill() -> None:
+    result = match_job_to_profile(
+        make_job(["Excellent knowledge of MS Office"]),
+        ["MS Office Suite (Advanced Excel)"],
+        [],
+    )
+
+    assert result["matched_skills"] == ["Excellent knowledge of MS Office"]
+    assert result["missing_skills"] == []
+
+
+def test_crm_requirement_matches_candidate_crm_tools() -> None:
+    result = match_job_to_profile(
+        make_job(["Hands-on experience with CRM software is a plus"]),
+        ["CRM Tools"],
+        [],
+    )
+
+    assert result["matched_skills"] == ["Hands-on experience with CRM software is a plus"]
+    assert result["missing_skills"] == []
+
+
+def test_unsupported_sales_executive_requirements_remain_missing() -> None:
+    requirements = [
+        "Thorough understanding of marketing and negotiating techniques",
+        "Aptitude in delivering attractive presentations",
+        "Fast learner and passion for sales",
+        "Self-motivated with a results-driven approach",
+    ]
+
+    result = match_job_to_profile(
+        make_job(requirements),
+        ["MS Office Suite (Advanced Excel)", "CRM Tools"],
+        [],
+    )
+
+    assert result["matched_skills"] == []
+    assert result["missing_skills"] == requirements
+
+
+def test_jd_requirement_phrases_are_not_added_to_candidate_profile_skills() -> None:
+    profile_skills = ["CRM Tools"]
+
+    match_job_to_profile(
+        make_job(["Hands-on experience with CRM software is a plus"]),
+        profile_skills,
+        [],
+    )
+
+    assert profile_skills == ["CRM Tools"]
+
+
+def test_generic_communication_does_not_match_stakeholder_communication() -> None:
+    result = match_job_to_profile(
+        make_job(["communication"]),
+        ["Stakeholder Communication"],
+        [],
+    )
+
+    assert result["matched_skills"] == []
+    assert result["missing_skills"] == ["communication"]
+
+
+def test_generic_reporting_does_not_match_data_reporting() -> None:
+    result = match_job_to_profile(
+        make_job(["reporting"]),
+        ["data reporting"],
+        [],
+    )
+
+    assert result["matched_skills"] == []
+    assert result["missing_skills"] == ["reporting"]
+
+
+def test_generic_leadership_does_not_match_team_leadership() -> None:
+    result = match_job_to_profile(
+        make_job(["leadership"]),
+        ["Team Leadership"],
+        [],
+    )
+
+    assert result["matched_skills"] == []
+    assert result["missing_skills"] == ["leadership"]
