@@ -340,6 +340,74 @@ def test_existing_sectioned_jd_text_still_parses() -> None:
     assert result["metadata"]["sections"]["responsibilities"]
 
 
+def test_sales_executive_requirements_classify_education_and_experience() -> None:
+    result = parse_job_description_text(
+        """
+Job Title:
+Sales Executive
+
+Responsibilities
+Conduct market research to identify selling possibilities.
+
+Requirements and skills
+Proven experience as a Sales Executive or relevant role
+Proficiency in English
+Excellent knowledge of MS Office
+Hands-on experience with CRM software is a plus
+Thorough understanding of marketing and negotiating techniques
+Fast learner and passion for sales
+Self-motivated with a results-driven approach
+Aptitude in delivering attractive presentations
+High school degree
+"""
+    )
+
+    required_skills = result["job_description"]["required_skills"]
+    assert "High school degree" not in required_skills
+    assert "High school degree" in result["job_description"]["education"]
+    assert "Proven experience as a Sales Executive or relevant role" not in required_skills
+    assert (
+        "Proven experience as a Sales Executive or relevant role"
+        in result["job_description"]["experience_level"]
+    )
+    assert "Proficiency in English" in required_skills
+    assert "Excellent knowledge of MS Office" in required_skills
+    assert "Hands-on experience with CRM software is a plus" in required_skills
+    assert "Thorough understanding of marketing and negotiating techniques" in required_skills
+    assert "Fast learner and passion for sales" in required_skills
+    assert "Self-motivated with a results-driven approach" in required_skills
+    assert "Aptitude in delivering attractive presentations" in required_skills
+
+
+def test_customer_experience_is_not_classified_as_work_experience() -> None:
+    result = parse_job_description_text(
+        """
+Requirements and skills
+Customer Experience
+User Experience
+"""
+    )
+
+    assert "Customer Experience" in result["job_description"]["required_skills"]
+    assert "User Experience" in result["job_description"]["required_skills"]
+    assert result["job_description"]["experience_level"] == ""
+
+
+def test_ambiguous_degree_with_skill_phrase_remains_required_skill() -> None:
+    result = parse_job_description_text(
+        """
+Requirements and skills
+Degree in Computer Science or equivalent technical skill
+"""
+    )
+
+    assert (
+        "Degree in Computer Science or equivalent technical skill"
+        in result["job_description"]["required_skills"]
+    )
+    assert result["job_description"]["education"] == ""
+
+
 def test_return_shape_is_exact() -> None:
     result = parse_job_description_text(sectioned_admin_jd())
 

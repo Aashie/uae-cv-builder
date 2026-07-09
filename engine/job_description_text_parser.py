@@ -161,8 +161,64 @@ def _split_skill_item(item: str) -> list[str]:
     return [_normalize_item(piece) for piece in pieces if _normalize_item(piece)]
 
 
+def _is_education_requirement(item: str) -> bool:
+    """Return whether item is clearly an education requirement."""
+    lowered = item.lower()
+    education_patterns = [
+        r"\bhigh school (?:degree|diploma)\b",
+        r"\bbachelor'?s degree\b",
+        r"\bbachelor degree\b",
+        r"\bdiploma\b",
+        r"\bdegree in\b",
+        r"\bbsc in\b",
+        r"\bba in\b",
+        r"\bmaster'?s degree\b",
+    ]
+    ambiguous_skill_terms = ("skill", "skills", "technical skill", "technical skills")
+    if any(term in lowered for term in ambiguous_skill_terms):
+        return False
+    return any(re.search(pattern, lowered) for pattern in education_patterns)
+
+
+def _is_experience_requirement(item: str) -> bool:
+    """Return whether item is clearly a work-experience requirement."""
+    lowered = item.lower()
+    experience_patterns = [
+        r"\bproven experience as\b",
+        r"\bwork experience as\b",
+        r"\b\d+\+?\s+years? of experience\b",
+        r"\bminimum\s+\d+\s+years?\s+experience\b",
+        r"\bminimum\s+\d+\s+year\s+experience\b",
+        r"\bprevious experience in\b",
+    ]
+    return any(re.search(pattern, lowered) for pattern in experience_patterns)
+
+
+def _is_certification_requirement(item: str) -> bool:
+    """Return whether item is clearly a certification requirement."""
+    lowered = item.lower()
+    return (
+        "certification" in lowered
+        or "certified" in lowered
+        or re.search(r"\b(?:cpa|cma)\b", lowered) is not None
+    )
+
+
+def _requirement_classification(item: str) -> str:
+    """Classify obvious non-skill requirements while preserving uncertain items."""
+    if _is_education_requirement(item):
+        return "education"
+    if _is_experience_requirement(item):
+        return "experience"
+    if _is_certification_requirement(item):
+        return "certification"
+    return "skill"
+
+
 def _append_requirement_skill_phrases(skills: list[str], item: str) -> None:
     """Append visible requirement skill phrases without inventing content."""
+    if _requirement_classification(item) != "skill":
+        return
     for skill in _split_skill_item(item):
         _append_unique(skills, skill)
 
@@ -209,10 +265,18 @@ def _extract_certifications(requirements: list[str]) -> list[str]:
     """Extract certification lines only when certification wording is present."""
     certifications: list[str] = []
     for item in requirements:
-        lowered = item.lower()
-        if "certification" in lowered or "certified" in lowered:
+        if _requirement_classification(item) == "certification":
             _append_unique(certifications, item)
     return certifications
+
+
+def _extract_requirement_field(requirements: list[str], classification: str) -> str:
+    """Extract classified requirement lines into a single schema field."""
+    items: list[str] = []
+    for item in requirements:
+        if _requirement_classification(item) == classification:
+            _append_unique(items, item)
+    return " ".join(items)
 
 
 def _warnings_for_sections(sections: dict[str, list[str]], job_description: dict) -> list[str]:
@@ -245,13 +309,23 @@ def parse_job_description_text(job_text) -> dict:
     sections, job_title = _parse_sections(lines)
     required_skills = _extract_required_skills(sections)
     requirements = sections["requirements"]
+    experience_level = " ".join(sections["experience"])
+    education = " ".join(sections["education"])
+    requirement_experience = _extract_requirement_field(requirements, "experience")
+    requirement_education = _extract_requirement_field(requirements, "education")
+    if requirement_experience:
+        experience_level = " ".join(
+            item for item in [experience_level, requirement_experience] if item
+        )
+    if requirement_education:
+        education = " ".join(item for item in [education, requirement_education] if item)
 
     job_description = {
         "job_title": job_title,
         "required_skills": required_skills,
         "soft_skills": _extract_soft_skills(required_skills),
-        "experience_level": " ".join(sections["experience"]),
-        "education": " ".join(sections["education"]),
+        "experience_level": experience_level,
+        "education": education,
         "certifications": _extract_certifications(requirements),
         "keywords": requirements.copy(),
     }
