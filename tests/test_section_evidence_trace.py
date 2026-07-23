@@ -111,6 +111,149 @@ def test_skill_flattening_handles_dict_categories():
     ]
 
 
+def test_nested_microsoft_office_supports_microsoft_office_resume_skill():
+    result = build_section_evidence_trace(
+        {"skills": ["Microsoft Office"]},
+        {
+            "skills": [],
+            "experience": [{"text": "Prepared reports.", "skills": ["Microsoft Office"]}],
+        },
+    )
+
+    trace = result["section_traces"]["skills"]
+    assert "Microsoft Office" in trace["supported_resume_skills"]
+    assert trace["unsupported_resume_skills"] == []
+    assert trace["candidate_profile_skills"] == []
+
+
+def test_nested_microsoft_office_supports_ms_office_resume_skill():
+    result = build_section_evidence_trace(
+        {"skills": ["MS Office"]},
+        {
+            "skills": [],
+            "experience": [{"text": "Prepared reports.", "skills": ["Microsoft Office"]}],
+        },
+    )
+
+    trace = result["section_traces"]["skills"]
+    assert "MS Office" in trace["supported_resume_skills"]
+    assert trace["unsupported_resume_skills"] == []
+
+
+def test_excel_resume_skill_supported_by_advanced_excel_or_nested_excel():
+    profile_with_top_level_excel = {
+        "skills": ["Data tracking & advanced Excel"],
+        "experience": [],
+    }
+    result = build_section_evidence_trace({"skills": ["Excel"]}, profile_with_top_level_excel)
+
+    trace = result["section_traces"]["skills"]
+    assert "Excel" in trace["supported_resume_skills"]
+
+    profile_with_nested_excel = {
+        "skills": [],
+        "experience": [{"text": "Tracked data.", "skills": ["Excel"]}],
+    }
+    nested_result = build_section_evidence_trace({"skills": ["Excel"]}, profile_with_nested_excel)
+
+    nested_trace = nested_result["section_traces"]["skills"]
+    assert "Excel" in nested_trace["supported_resume_skills"]
+    assert nested_trace["unsupported_resume_skills"] == []
+
+
+def test_nested_experience_skills_support_exact_resume_skills():
+    final_resume = {
+        "skills": [
+            "HTML/CSS",
+            "Meta Ads",
+            "Keyword Research",
+            "Social Media Scheduling",
+        ]
+    }
+    candidate_profile = {
+        "skills": [],
+        "experience": [
+            {
+                "text": "Supported digital marketing campaigns.",
+                "skills": [
+                    "HTML/CSS",
+                    "Meta Ads",
+                    "keyword research",
+                    "social media scheduling",
+                ],
+            }
+        ],
+    }
+
+    result = build_section_evidence_trace(final_resume, candidate_profile)
+
+    trace = result["section_traces"]["skills"]
+    assert trace["supported_resume_skills"] == [
+        "HTML/CSS",
+        "Meta Ads",
+        "Keyword Research",
+        "Social Media Scheduling",
+    ]
+    assert trace["unsupported_resume_skills"] == []
+    assert "reviewed_candidate_profile.experience.skills" in trace["evidence_sources"]
+
+
+def test_english_profile_skill_supports_proficiency_in_english_resume_skill():
+    result = build_section_evidence_trace(
+        {"skills": ["Proficiency In English"]},
+        {
+            "skills": ["English — Fluent (IELTS Band 7.0)"],
+            "experience": [],
+        },
+    )
+
+    trace = result["section_traces"]["skills"]
+    assert "Proficiency In English" in trace["supported_resume_skills"]
+    assert trace["unsupported_resume_skills"] == []
+
+
+def test_crm_software_remains_unsupported_without_explicit_crm_evidence():
+    result = build_section_evidence_trace(
+        {"skills": ["CRM software"]},
+        {
+            "skills": ["Data tracking & advanced Excel"],
+            "experience": [
+                {"text": "Tracked work in client databases.", "skills": ["Excel"]},
+                {"text": "No CRM provided.", "skills": ["client databases", "no CRM provided"]},
+            ],
+        },
+    )
+
+    trace = result["section_traces"]["skills"]
+    assert trace["supported_resume_skills"] == []
+    assert trace["unsupported_resume_skills"] == ["CRM software"]
+
+
+def test_unsupported_resume_skills_are_reported_clearly():
+    final_resume = {
+        "skills": [
+            "Negotiating techniques",
+            "Attractive presentations",
+            "Fast learner",
+            "Results-driven approach",
+        ]
+    }
+    candidate_profile = {
+        "skills": ["Data tracking & advanced Excel"],
+        "experience": [{"text": "Tracked sales data.", "skills": ["Excel"]}],
+    }
+
+    result = build_section_evidence_trace(final_resume, candidate_profile)
+
+    trace = result["section_traces"]["skills"]
+    assert trace["supported_resume_skills"] == []
+    assert trace["unsupported_resume_skills"] == final_resume["skills"]
+    assert any(
+        "Unsupported resume skills found in the final resume" in warning
+        for warning in trace["warnings"]
+    )
+
+
 def test_experience_trace_is_section_level_only():
     result = build_section_evidence_trace(
         _valid_final_resume(),

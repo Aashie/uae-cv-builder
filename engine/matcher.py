@@ -39,7 +39,15 @@ REMOVABLE_TOKENS = {
 
 SAFE_CORE_ALIASES = {
     "crm": {"crm"},
-    "ms office": {"ms office"},
+    "ms office": {"microsoft office", "ms office"},
+}
+
+NEGATED_CORE_PHRASES = {
+    "crm": (
+        "no crm",
+        "without crm",
+        "not crm",
+    ),
 }
 
 
@@ -82,18 +90,38 @@ def _skill_cores(skill: str) -> set[str]:
     return {core for core in cores if core and core not in GENERIC_UNSAFE_CORES}
 
 
+def _is_negated_core(required_core: str, candidate_core: str) -> bool:
+    """Return whether candidate text explicitly negates a safe core."""
+    return any(
+        phrase in candidate_core
+        for phrase in NEGATED_CORE_PHRASES.get(required_core, ())
+    )
+
+
 def _is_supported_by_candidate_core(required_core: str, candidate_skill: str) -> bool:
     """Return whether candidate skill safely supports a JD core."""
-    if not required_core or required_core in GENERIC_UNSAFE_CORES:
+    if not required_core:
         return False
     candidate_core = _normalize_core_text(candidate_skill)
     if not candidate_core:
         return False
+    if _is_negated_core(required_core, candidate_core):
+        return False
     if required_core == candidate_core:
         return True
+    if required_core in GENERIC_UNSAFE_CORES:
+        return False
     if required_core in SAFE_CORE_ALIASES and required_core in _skill_cores(candidate_skill):
         return True
     return f" {required_core} " in f" {candidate_core} "
+
+
+def skill_is_supported_by_candidate(required_skill: str, candidate_skill: str) -> bool:
+    """Return whether a candidate skill safely supports a required skill phrase."""
+    return _is_supported_by_candidate_core(
+        _normalize_core_text(required_skill),
+        candidate_skill,
+    )
 
 
 def _matches_required_skill(required_core: str, candidate_skills: list[str]) -> bool:

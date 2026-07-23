@@ -1,5 +1,7 @@
 """Deterministic section-level evidence trace helpers."""
 
+from engine.matcher import skill_is_supported_by_candidate
+
 
 def _as_list(value):
     """Return value as a list without splitting strings."""
@@ -101,6 +103,27 @@ def _entry_text(entry):
     return entry
 
 
+def _entry_skills(entry):
+    if not isinstance(entry, dict):
+        return []
+    return _as_list(entry.get("skills", []))
+
+
+def _candidate_skill_evidence(profile):
+    skills = []
+    sources = []
+    if _as_list(profile.get("skills")):
+        skills.extend(_as_list(profile.get("skills")))
+        sources.append("reviewed_candidate_profile.skills")
+    for entry in _as_list(profile.get("experience")):
+        entry_skills = _entry_skills(entry)
+        if entry_skills:
+            skills.extend(entry_skills)
+            if "reviewed_candidate_profile.experience.skills" not in sources:
+                sources.append("reviewed_candidate_profile.experience.skills")
+    return _unique_preserve_order(skills), sources
+
+
 def _profile_snippets(profile, fields, limit=8):
     snippets = []
     for field in fields:
@@ -167,12 +190,19 @@ def _professional_summary_trace(profile):
 def _skills_trace(final_resume, profile):
     resume_skills = _flatten_resume_skills(final_resume.get("skills", []))
     candidate_skills = _unique_preserve_order(profile.get("skills", []))
-    candidate_skill_lookup = {_normalize_text(skill) for skill in candidate_skills}
+    candidate_support_skills, evidence_sources = _candidate_skill_evidence(profile)
     supported_resume_skills = [
-        skill for skill in resume_skills if _normalize_text(skill) in candidate_skill_lookup
+        skill
+        for skill in resume_skills
+        if any(
+            skill_is_supported_by_candidate(skill, candidate_skill)
+            for candidate_skill in candidate_support_skills
+        )
     ]
     unsupported_resume_skills = [
-        skill for skill in resume_skills if _normalize_text(skill) not in candidate_skill_lookup
+        skill
+        for skill in resume_skills
+        if skill not in supported_resume_skills
     ]
 
     supported = bool(supported_resume_skills) or (not resume_skills and bool(candidate_skills))
@@ -193,13 +223,14 @@ def _skills_trace(final_resume, profile):
         "skills",
         supported,
         support_level,
-        ["reviewed_candidate_profile.skills"] if candidate_skills else [],
-        [_shorten(skill) for skill in candidate_skills[:8]],
+        evidence_sources,
+        [_shorten(skill) for skill in candidate_support_skills[:8]],
         warnings,
     )
     trace["supported_resume_skills"] = supported_resume_skills
     trace["unsupported_resume_skills"] = unsupported_resume_skills
     trace["candidate_profile_skills"] = candidate_skills
+    trace["candidate_support_skills"] = candidate_support_skills
     return trace
 
 

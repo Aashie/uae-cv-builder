@@ -144,6 +144,32 @@ def test_ms_office_requirement_matches_specific_candidate_office_skill() -> None
     assert result["missing_skills"] == []
 
 
+def test_ms_office_requirement_matches_microsoft_office_evidence_skill() -> None:
+    result = match_job_to_profile(
+        make_job(["Excellent knowledge of MS Office"]),
+        [],
+        [make_evidence("exp-3", ["Microsoft Office"])],
+    )
+
+    assert result["matched_skills"] == ["Excellent knowledge of MS Office"]
+    assert result["missing_skills"] == []
+    assert result["evidence_matches"] == {
+        "Excellent knowledge of MS Office": ["exp-3"],
+    }
+
+
+def test_ms_office_requirement_does_not_match_advanced_excel_alone() -> None:
+    result = match_job_to_profile(
+        make_job(["Excellent knowledge of MS Office"]),
+        [],
+        [make_evidence("exp-1", ["Advanced Excel"])],
+    )
+
+    assert result["matched_skills"] == []
+    assert result["missing_skills"] == ["Excellent knowledge of MS Office"]
+    assert result["evidence_matches"] == {}
+
+
 def test_crm_requirement_matches_candidate_crm_tools() -> None:
     result = match_job_to_profile(
         make_job(["Hands-on experience with CRM software is a plus"]),
@@ -153,6 +179,22 @@ def test_crm_requirement_matches_candidate_crm_tools() -> None:
 
     assert result["matched_skills"] == ["Hands-on experience with CRM software is a plus"]
     assert result["missing_skills"] == []
+
+
+def test_crm_requirement_does_not_match_excel_or_client_database_evidence() -> None:
+    result = match_job_to_profile(
+        make_job(["Hands-on experience with CRM software is a plus"]),
+        ["Data tracking & advanced Excel"],
+        [
+            make_evidence("exp-1", ["Excel"]),
+            make_evidence("exp-2", ["client databases"]),
+            make_evidence("exp-3", ["no CRM provided"]),
+        ],
+    )
+
+    assert result["matched_skills"] == []
+    assert result["missing_skills"] == ["Hands-on experience with CRM software is a plus"]
+    assert result["evidence_matches"] == {}
 
 
 def test_unsupported_sales_executive_requirements_remain_missing() -> None:
