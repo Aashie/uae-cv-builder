@@ -66,6 +66,8 @@ def test_valid_sectioned_admin_cv_parses_candidate_profile_payload() -> None:
         "Microsoft Excel",
         "Communication",
         "Scheduling",
+        "English",
+        "Arabic",
     ]
     assert result["candidate_profile"]["certifications"] == [
         "Certified Administrative Professional"
@@ -278,6 +280,104 @@ def test_languages_extraction_when_supported_in_metadata() -> None:
     result = parse_candidate_profile_text(sectioned_admin_cv())
 
     assert result["metadata"]["sections"]["languages"] == ["English", "Arabic"]
+
+
+def test_explicit_languages_section_adds_exact_entries_to_skills() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+LANGUAGES
+English: Fluent
+Nepali: Native
+Hindi: Fluent
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert "English: Fluent" in skills
+    assert "Nepali: Native" in skills
+    assert "Hindi: Fluent" in skills
+
+
+def test_language_metadata_is_preserved_without_top_level_languages_key() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+LANGUAGES
+English: Fluent
+Nepali: Native
+Hindi: Fluent
+"""
+    )
+
+    assert result["metadata"]["sections"]["languages"] == [
+        "English: Fluent",
+        "Nepali: Native",
+        "Hindi: Fluent",
+    ]
+    assert "languages" not in result["candidate_profile"]
+
+
+def test_ielts_certification_does_not_invent_english_language_skill() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+CERTIFICATIONS
+IELTS Band 7.0
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert "English: Fluent" not in skills
+    assert "English" not in skills
+
+
+def test_experience_mention_does_not_invent_language_skill() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Delivered English classes and IELTS preparation.
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert "English: Fluent" not in skills
+    assert "English" not in skills
+
+
+def test_bullet_separated_languages_section_splits_safely() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+LANGUAGES
+\u2022 English: Fluent \u2022 Nepali: Native \u2022 Hindi: Fluent
+"""
+    )
+
+    assert result["candidate_profile"]["skills"] == [
+        "English: Fluent",
+        "Nepali: Native",
+        "Hindi: Fluent",
+    ]
+
+
+def test_duplicate_language_entries_are_not_duplicated_in_skills() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+SKILLS
+English: Fluent
+
+LANGUAGES
+English: Fluent
+Nepali: Native
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert skills.count("English: Fluent") == 1
+    assert skills.count("Nepali: Native") == 1
 
 
 def test_missing_sections_produce_warnings() -> None:

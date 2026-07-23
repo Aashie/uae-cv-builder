@@ -323,6 +323,39 @@ def _extract_skills(sections: dict[str, list[str]]) -> list[str]:
     return skills
 
 
+def _append_unique_case_insensitive(items: list[str], value: str) -> None:
+    """Append value once case-insensitively, preserving first-seen spelling."""
+    normalized_value = value.casefold()
+    if value and normalized_value not in {item.casefold() for item in items}:
+        items.append(value)
+
+
+def _split_language_item(item: str) -> list[str]:
+    """Split explicit language section items on safe separators only."""
+    separator_pattern = rf"(?:{SKILL_BULLET_SEPARATOR_PATTERN}|[;|])"
+    pieces = re.split(separator_pattern, item)
+    stripped_pieces = [
+        re.sub(
+            rf"^(?:{SKILL_BULLET_SEPARATOR_PATTERN}|[;|])+\s*|\s*(?:{SKILL_BULLET_SEPARATOR_PATTERN}|[;|])+$",
+            "",
+            piece,
+        )
+        for piece in pieces
+    ]
+    return [
+        _normalize_item(piece)
+        for piece in stripped_pieces
+        if _normalize_item(piece)
+    ]
+
+
+def _add_language_skills(skills: list[str], sections: dict[str, list[str]]) -> None:
+    """Add exact explicit language section entries to skills."""
+    for item in sections["languages"]:
+        for language in _split_language_item(item):
+            _append_unique_case_insensitive(skills, language)
+
+
 def _looks_like_role_heading(item: str) -> bool:
     """Return whether an experience line looks like a source role heading."""
     if "|" in item:
@@ -429,6 +462,7 @@ def parse_candidate_profile_text(cv_text) -> dict:
     name, name_warnings = _extract_name(lines)
     sections = _parse_sections(lines)
     skills = _extract_skills(sections)
+    _add_language_skills(skills, sections)
     candidate_profile = {
         "name": name,
         "skills": skills,
