@@ -1070,8 +1070,47 @@ def _real_flow_docx_gate(analysis_result: dict) -> tuple[bool, list[str]]:
             blockers.append("Section-level evidence trace is missing.")
         elif evidence_trace.get("status") == "failed":
             blockers.append("Section-level evidence trace failed.")
+        else:
+            blockers.extend(_real_flow_evidence_trace_docx_blockers(evidence_trace))
 
     return not blockers, blockers
+
+
+def _real_flow_evidence_trace_docx_blockers(evidence_trace: dict) -> list[str]:
+    """Return DOCX blockers from final-resume-critical evidence trace findings."""
+    section_traces = evidence_trace.get("section_traces", {})
+    if not isinstance(section_traces, dict):
+        return ["Download blocked because evidence trace is missing or failed."]
+
+    blockers: list[str] = []
+    skills_trace = section_traces.get("skills", {})
+    unsupported_skills = []
+    if isinstance(skills_trace, dict):
+        unsupported_skills = [
+            str(skill).strip()
+            for skill in skills_trace.get("unsupported_resume_skills", [])
+            if str(skill).strip()
+        ]
+    if unsupported_skills:
+        blockers.append(
+            "Download blocked because final resume contains unsupported skills: "
+            + ", ".join(unsupported_skills)
+            + "."
+        )
+
+    critical_sections = {
+        "skills": "skills section",
+        "professional_summary": "professional summary",
+        "experience_bullets": "experience highlights",
+    }
+    for section_key, section_label in critical_sections.items():
+        section_trace = section_traces.get(section_key)
+        if isinstance(section_trace, dict) and section_trace.get("supported") is False:
+            blockers.append(
+                f"Download blocked because the {section_label} is not supported by candidate evidence."
+            )
+
+    return blockers
 
 
 def _build_real_flow_docx_bytes(final_resume: dict) -> bytes | None:

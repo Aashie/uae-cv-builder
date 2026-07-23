@@ -74,6 +74,88 @@ def test_build_reviewed_experience_recomputes_nested_skills() -> None:
     assert "CRM" not in result[2]["skills"]
 
 
+def _valid_docx_analysis_result() -> dict:
+    return {
+        "status": "success",
+        "final_resume": {"skills": ["Microsoft Office"]},
+        "final_resume_validation": {"is_valid": True, "errors": []},
+    }
+
+
+def _set_docx_gate_session_state(monkeypatch, evidence_trace: dict) -> None:
+    monkeypatch.setattr(app, "_is_real_flow_analysis_stale", lambda: False)
+    app.st.session_state["upload_pipeline_result"] = {"status": "success"}
+    app.st.session_state["analysis_stale"] = False
+    app.st.session_state["analysis_completed"] = True
+    app.st.session_state["real_flow_evidence_trace"] = evidence_trace
+
+
+def _supported_evidence_trace() -> dict:
+    return {
+        "status": "success",
+        "section_traces": {
+            "job_title": {
+                "supported": True,
+                "support_level": "derived_from_job_description",
+            },
+            "skills": {
+                "supported": True,
+                "support_level": "direct",
+                "unsupported_resume_skills": [],
+            },
+            "professional_summary": {
+                "supported": True,
+                "support_level": "section_level",
+            },
+            "experience_bullets": {
+                "supported": True,
+                "support_level": "section_level",
+            },
+            "metadata_note": {
+                "supported": True,
+                "support_level": "not_applicable",
+                "warnings": ["This MVP trace shows section-level evidence only."],
+            },
+        },
+    }
+
+
+def test_real_flow_docx_gate_blocks_unsupported_resume_skills(monkeypatch) -> None:
+    evidence_trace = _supported_evidence_trace()
+    evidence_trace["section_traces"]["skills"]["unsupported_resume_skills"] = ["CRM software"]
+    _set_docx_gate_session_state(monkeypatch, evidence_trace)
+
+    can_download, blockers = app._real_flow_docx_gate(_valid_docx_analysis_result())
+
+    assert can_download is False
+    assert any("unsupported skills" in blocker for blocker in blockers)
+    assert any("CRM software" in blocker for blocker in blockers)
+
+
+def test_real_flow_docx_gate_allows_supported_skills_trace(monkeypatch) -> None:
+    _set_docx_gate_session_state(monkeypatch, _supported_evidence_trace())
+
+    can_download, blockers = app._real_flow_docx_gate(_valid_docx_analysis_result())
+
+    assert can_download is True
+    assert blockers == []
+
+
+def test_real_flow_docx_gate_does_not_block_only_on_missing_job_title_trace(monkeypatch) -> None:
+    evidence_trace = _supported_evidence_trace()
+    evidence_trace["section_traces"]["job_title"] = {
+        "supported": False,
+        "support_level": "missing_evidence",
+        "warnings": ["Job title source is missing from parsed job description."],
+    }
+    _set_docx_gate_session_state(monkeypatch, evidence_trace)
+
+    can_download, blockers = app._real_flow_docx_gate(_valid_docx_analysis_result())
+
+    assert can_download is True
+    assert blockers == []
+
+
 def test_missing_sample_profile_file_raises_clear_error(monkeypatch) -> None:
     missing_path = Path("missing_profile.json")
     monkeypatch.setattr(app, "SAMPLE_PROFILE_PATH", missing_path)
