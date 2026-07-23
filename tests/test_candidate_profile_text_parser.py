@@ -424,6 +424,120 @@ AASHUTOSH BADAL Administrative & Operations Executive CORE COMPETENCIES
     assert "Operations:" not in skills
 
 
+def test_skill_block_using_triangle_bullets_splits_into_separate_skills() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+Skills
+\u25b8 Operations & workflow coordination \u25b8 Data tracking & advanced Excel \u25b8 High-volume client communication
+"""
+    )
+
+    assert result["candidate_profile"]["skills"] == [
+        "Operations & workflow coordination",
+        "Data tracking & advanced Excel",
+        "High-volume client communication",
+    ]
+
+
+def test_skill_bullet_splitting_works_without_spaces() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+Skills
+Operations & workflow coordination\u25b8Data tracking & advanced Excel\u25b8High-volume client communication
+"""
+    )
+
+    assert result["candidate_profile"]["skills"] == [
+        "Operations & workflow coordination",
+        "Data tracking & advanced Excel",
+        "High-volume client communication",
+    ]
+
+
+def test_observed_triangle_skill_block_splits_without_over_splitting_phrases() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL
+Skills
+\u25b8 Operations & workflow coordination \u25b8 Data tracking & advanced Excel \u25b8 High-volume client communication \u25b8 Stakeholder & cross-cultural communication \u25b8 Document control & record-keeping \u25b8 Process documentation & reporting \u25b8 Training delivery & curriculum design \u25b8 Project support (Agile / PRINCE2 awareness) \u25b8 Field team logistics & scheduling \u25b8 Business Intelligence \u2014 dashboard basics
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert skills == [
+        "Operations & workflow coordination",
+        "Data tracking & advanced Excel",
+        "High-volume client communication",
+        "Stakeholder & cross-cultural communication",
+        "Document control & record-keeping",
+        "Process documentation & reporting",
+        "Training delivery & curriculum design",
+        "Project support (Agile / PRINCE2 awareness)",
+        "Field team logistics & scheduling",
+        "Business Intelligence \u2014 dashboard basics",
+    ]
+    assert len(skills) > 1
+    assert "High-volume client communication" in skills
+    assert "Stakeholder & cross-cultural communication" in skills
+    assert "Document control & record-keeping" in skills
+    assert "Project support (Agile / PRINCE2 awareness)" in skills
+    assert "Business Intelligence \u2014 dashboard basics" in skills
+
+
+def test_parenthetical_comma_skill_phrase_is_not_broken() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+Skills
+content creation (Canva, CapCut)
+"""
+    )
+
+    assert result["candidate_profile"]["skills"] == [
+        "content creation (Canva, CapCut)"
+    ]
+
+
+def test_semicolon_and_pipe_split_clear_skill_separators() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+Skills
+Skill One; Skill Two
+Skill Three|Skill Four
+"""
+    )
+
+    assert result["candidate_profile"]["skills"] == [
+        "Skill One",
+        "Skill Two",
+        "Skill Three",
+        "Skill Four",
+    ]
+
+
+def test_bullet_skill_splitting_does_not_invent_or_expand_skills() -> None:
+    result = parse_candidate_profile_text(
+        """
+AASHUTOSH BADAL
+Skills
+\u25b8 Data tracking & advanced Excel \u25b8 Business Intelligence \u2014 dashboard basics \u25b8 Project support (Agile / PRINCE2 awareness)
+"""
+    )
+
+    skills = result["candidate_profile"]["skills"]
+    assert "Data tracking & advanced Excel" in skills
+    assert "Business Intelligence \u2014 dashboard basics" in skills
+    assert "Project support (Agile / PRINCE2 awareness)" in skills
+    assert "MS Office" not in skills
+    assert "CRM" not in skills
+    assert "Power BI" not in skills
+    assert "Agile" not in skills
+    assert "PRINCE2" not in skills
+
+
 def test_real_pdf_professional_experience_extracts_entries() -> None:
     result = parse_candidate_profile_text(
         """

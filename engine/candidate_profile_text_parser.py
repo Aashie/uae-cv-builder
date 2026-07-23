@@ -107,6 +107,23 @@ PHONE_PATTERNS = [
     re.compile(r"(?<!\d)05\d(?:[\s-]?\d){7}(?!\d)"),
 ]
 
+SKILL_BULLET_SEPARATORS = (
+    "\u25b8",
+    "\u2022",
+    "\u25cf",
+    "\u25aa",
+    "\u25e6",
+    "â–¸",
+    "â€¢",
+    "â—",
+    "â–ª",
+    "â—¦",
+    "Ã¢â‚¬Â¢",
+)
+SKILL_BULLET_SEPARATOR_PATTERN = "|".join(
+    re.escape(separator) for separator in SKILL_BULLET_SEPARATORS
+)
+
 
 def _empty_candidate_profile() -> dict:
     """Return the current candidate profile shape."""
@@ -278,9 +295,22 @@ def _parse_sections(lines: list[str]) -> dict[str, list[str]]:
 
 
 def _split_list_item(item: str) -> list[str]:
-    """Split comma/semicolon separated list items."""
-    pieces = re.split(r"[,;](?![^()]*\))", item)
-    return [_normalize_item(piece) for piece in pieces if _normalize_item(piece)]
+    """Split safely separated list items without rewriting candidate text."""
+    separator_pattern = rf"(?:{SKILL_BULLET_SEPARATOR_PATTERN}|[,;|](?![^()]*\)))"
+    pieces = re.split(separator_pattern, item)
+    stripped_pieces = [
+        re.sub(
+            rf"^(?:{SKILL_BULLET_SEPARATOR_PATTERN}|[;|])+\s*|\s*(?:{SKILL_BULLET_SEPARATOR_PATTERN}|[;|])+$",
+            "",
+            piece,
+        )
+        for piece in pieces
+    ]
+    return [
+        _normalize_item(piece)
+        for piece in stripped_pieces
+        if _normalize_item(piece)
+    ]
 
 
 def _extract_skills(sections: dict[str, list[str]]) -> list[str]:
