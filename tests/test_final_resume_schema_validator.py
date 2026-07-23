@@ -148,7 +148,68 @@ def test_non_list_skills_category_fails() -> None:
     assert "Skills category 'technical' must be a list." in result["errors"]
 
 
-def test_empty_skills_lists_are_valid() -> None:
+def test_empty_professional_summary_fails() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = "   "
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert "Section 'professional_summary' must not be empty." in result["errors"]
+
+
+def test_short_professional_summary_fails() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = "Short"
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert "Section 'professional_summary' is too weak." in result["errors"]
+
+
+def test_generic_match_score_summary_fails() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Professional with a 28.57% match score for opportunities."
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert (
+        "Section 'professional_summary' contains only the generic match-score placeholder."
+        in result["errors"]
+    )
+
+
+def test_generic_match_score_summary_without_period_fails() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Professional with a 0% match score for opportunities"
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert (
+        "Section 'professional_summary' contains only the generic match-score placeholder."
+        in result["errors"]
+    )
+
+
+def test_legitimate_summary_with_percentage_passes() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Improved reporting accuracy by 20% while coordinating operations workflows."
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is True
+
+
+def test_empty_skills_lists_fail() -> None:
     final_resume = valid_final_resume()
     final_resume["skills"] = {
         "technical": [],
@@ -161,12 +222,80 @@ def test_empty_skills_lists_are_valid() -> None:
 
     result = validate_final_resume(final_resume)
 
+    assert result["is_valid"] is False
+    assert "Section 'skills' must contain at least one visible skill." in result["errors"]
+
+
+def test_skills_with_one_visible_skill_pass() -> None:
+    final_resume = valid_final_resume()
+    final_resume["skills"] = {
+        "technical": [],
+        "soft": [],
+        "tools": ["CRM"],
+        "domain": [],
+        "matched_skills": [],
+        "strongest_skills": [],
+    }
+
+    result = validate_final_resume(final_resume)
+
     assert result["is_valid"] is True
 
 
-def test_experience_bullets_list_is_valid_without_validating_bullet_internals() -> None:
+def test_empty_experience_bullets_fail() -> None:
     final_resume = valid_final_resume()
-    final_resume["experience_bullets"] = ["not a bullet dict"]
+    final_resume["experience_bullets"] = []
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert (
+        "Section 'experience_bullets' must contain at least one visible bullet."
+        in result["errors"]
+    )
+
+
+def test_experience_bullets_with_only_empty_strings_fail() -> None:
+    final_resume = valid_final_resume()
+    final_resume["experience_bullets"] = ["", "   ", {"text": "  "}]
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert (
+        "Section 'experience_bullets' must contain at least one visible bullet."
+        in result["errors"]
+    )
+
+
+def test_experience_bullets_with_non_empty_string_pass() -> None:
+    final_resume = valid_final_resume()
+    final_resume["experience_bullets"] = ["Preserved bullet text."]
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is True
+
+
+def test_useful_final_resume_passes() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Operations professional with documented reporting and coordination experience."
+    )
+    final_resume["skills"] = {
+        "technical": [],
+        "soft": ["Leadership"],
+        "tools": [],
+        "domain": [],
+        "matched_skills": [],
+        "strongest_skills": [],
+    }
+    final_resume["experience_bullets"] = [
+        {
+            "text": "Coordinated reporting workflows.",
+            "source_evidence_id": "EXP001",
+        }
+    ]
 
     result = validate_final_resume(final_resume)
 

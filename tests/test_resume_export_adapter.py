@@ -144,7 +144,7 @@ def test_adapter_does_not_mutate_input() -> None:
     assert final_resume == original
 
 
-def test_empty_but_valid_sections_export_successfully() -> None:
+def test_empty_sections_fail_export_payload_validation() -> None:
     final_resume = valid_final_resume()
     final_resume["job_title"] = ""
     final_resume["professional_summary"] = ""
@@ -160,9 +160,13 @@ def test_empty_but_valid_sections_export_successfully() -> None:
 
     payload = build_resume_export_payload(final_resume)
 
-    assert payload["status"] == "success"
-    assert payload["document_title"] == ""
-    assert section_by_id(payload, "experience")["content"] == []
+    assert payload["status"] == "failed"
+    assert "Section 'professional_summary' must not be empty." in payload["errors"]
+    assert "Section 'skills' must contain at least one visible skill." in payload["errors"]
+    assert (
+        "Section 'experience_bullets' must contain at least one visible bullet."
+        in payload["errors"]
+    )
 
 
 def test_payload_sections_appear_in_stable_order() -> None:
