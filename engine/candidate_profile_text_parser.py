@@ -124,6 +124,28 @@ SKILL_BULLET_SEPARATOR_PATTERN = "|".join(
     re.escape(separator) for separator in SKILL_BULLET_SEPARATORS
 )
 
+EXPERIENCE_SKILL_TERMS = (
+    ("Microsoft Office", re.compile(r"\bMicrosoft\s+Office\b", flags=re.IGNORECASE)),
+    ("MS Office", re.compile(r"\bMS\s+Office\b", flags=re.IGNORECASE)),
+    ("HTML/CSS", re.compile(r"\bHTML\s*/\s*CSS\b", flags=re.IGNORECASE)),
+    ("Advanced Excel", re.compile(r"\bAdvanced\s+Excel\b", flags=re.IGNORECASE)),
+    ("Meta Ads", re.compile(r"\bMeta\s+Ads\b", flags=re.IGNORECASE)),
+    ("keyword research", re.compile(r"\bkeyword\s+research\b", flags=re.IGNORECASE)),
+    (
+        "social media scheduling",
+        re.compile(r"\bsocial\s+media\s+scheduling\b", flags=re.IGNORECASE),
+    ),
+    ("HTML", re.compile(r"\bHTML\b", flags=re.IGNORECASE)),
+    ("CSS", re.compile(r"\bCSS\b", flags=re.IGNORECASE)),
+    ("Excel", re.compile(r"\bExcel\b", flags=re.IGNORECASE)),
+)
+
+SUBSUMED_EXPERIENCE_SKILLS = {
+    "HTML/CSS": {"HTML", "CSS"},
+    "Advanced Excel": {"Excel"},
+    "Microsoft Excel": {"Excel"},
+}
+
 
 def _empty_candidate_profile() -> dict:
     """Return the current candidate profile shape."""
@@ -369,6 +391,54 @@ def _looks_like_role_heading(item: str) -> bool:
     return False
 
 
+def _is_negated_experience_skill_match(text: str, start: int, end: int) -> bool:
+    """Return whether a skill match appears in a local negative context."""
+    prefix = text[max(0, start - 60):start].casefold()
+    suffix = text[end:min(len(text), end + 40)].casefold()
+
+    if re.search(r"\b(?:no|without|lacks)\s+(?:\w+\s+){0,4}$", prefix):
+        return True
+    if re.search(r"\bnot\s+using\s+(?:\w+\s+){0,4}$", prefix):
+        return True
+    if re.match(r"^\s+(?:\w+\s+){0,4}(?:access|provided)\b", suffix):
+        return True
+    return False
+
+
+def _extract_closed_list_experience_skills(text: str) -> list[str]:
+    """Extract explicit closed-list skills from experience text."""
+    extracted_skills: list[str] = []
+    for skill, pattern in EXPERIENCE_SKILL_TERMS:
+        for match in pattern.finditer(text):
+            if _is_negated_experience_skill_match(text, match.start(), match.end()):
+                continue
+            if any(
+                skill in SUBSUMED_EXPERIENCE_SKILLS.get(existing_skill, set())
+                for existing_skill in extracted_skills
+            ):
+                continue
+            _append_unique_case_insensitive(extracted_skills, skill)
+            break
+    return extracted_skills
+
+
+def _experience_entry_skills(item: str, skills: list[str]) -> list[str]:
+    """Return top-level and closed-list skills explicitly present in one entry."""
+    entry_skills = [
+        skill
+        for skill in skills
+        if re.search(rf"\b{re.escape(skill)}\b", item, flags=re.IGNORECASE)
+    ]
+    for skill in _extract_closed_list_experience_skills(item):
+        if any(
+            skill in SUBSUMED_EXPERIENCE_SKILLS.get(existing_skill, set())
+            for existing_skill in entry_skills
+        ):
+            continue
+        _append_unique_case_insensitive(entry_skills, skill)
+    return entry_skills
+
+
 def _extract_experience(sections: dict[str, list[str]], skills: list[str]) -> list[dict]:
     """Build sample-compatible experience entries from explicit experience lines."""
     experience: list[dict] = []
@@ -389,11 +459,7 @@ def _extract_experience(sections: dict[str, list[str]], skills: list[str]) -> li
         experience_items = role_blocks if len(role_blocks) == role_heading_count else [" ".join(experience_items)]
 
     for index, item in enumerate(experience_items, start=1):
-        entry_skills = [
-            skill
-            for skill in skills
-            if re.search(rf"\b{re.escape(skill)}\b", item, flags=re.IGNORECASE)
-        ]
+        entry_skills = _experience_entry_skills(item, skills)
         experience.append(
             {
                 "id": f"exp-{index}",

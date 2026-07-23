@@ -638,6 +638,93 @@ Skills
     assert "PRINCE2" not in skills
 
 
+def test_experience_extracts_microsoft_office_and_html_css_only_nested() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Taught Microsoft Office, HTML/CSS fundamentals, and exam technique to students.
+"""
+    )
+
+    experience_skills = result["candidate_profile"]["experience"][0]["skills"]
+    assert "Microsoft Office" in experience_skills
+    assert "HTML/CSS" in experience_skills
+    assert "Microsoft Office" not in result["candidate_profile"]["skills"]
+    assert "HTML/CSS" not in result["candidate_profile"]["skills"]
+
+
+def test_experience_extracts_digital_marketing_tools_only_nested() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Supported social media scheduling, keyword research, and basic Meta Ads management.
+"""
+    )
+
+    experience_skills = result["candidate_profile"]["experience"][0]["skills"]
+    assert "social media scheduling" in experience_skills
+    assert "keyword research" in experience_skills
+    assert "Meta Ads" in experience_skills
+    assert "social media scheduling" not in result["candidate_profile"]["skills"]
+    assert "keyword research" not in result["candidate_profile"]["skills"]
+    assert "Meta Ads" not in result["candidate_profile"]["skills"]
+
+
+def test_experience_extracts_excel_but_not_negated_crm() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Managed client databases in Excel; no CRM provided.
+"""
+    )
+
+    experience_skills = result["candidate_profile"]["experience"][0]["skills"]
+    assert "Excel" in experience_skills
+    assert "CRM" not in experience_skills
+
+
+def test_experience_does_not_extract_negated_salesforce() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Worked without Salesforce access; tracked leads manually.
+"""
+    )
+
+    assert "Salesforce" not in result["candidate_profile"]["experience"][0]["skills"]
+
+
+def test_experience_does_not_extract_negated_excel() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Tracked records manually without Excel access.
+"""
+    )
+
+    assert "Excel" not in result["candidate_profile"]["experience"][0]["skills"]
+
+
+def test_experience_advanced_excel_does_not_expand_to_ms_office() -> None:
+    result = parse_candidate_profile_text(
+        """
+Jane Admin
+EXPERIENCE
+Utilized Advanced Excel for weekly reporting.
+"""
+    )
+
+    experience_skills = result["candidate_profile"]["experience"][0]["skills"]
+    assert "Advanced Excel" in experience_skills
+    assert "Microsoft Office" not in experience_skills
+    assert "MS Office" not in experience_skills
+
+
 def test_real_pdf_professional_experience_extracts_entries() -> None:
     result = parse_candidate_profile_text(
         """
