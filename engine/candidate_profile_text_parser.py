@@ -422,11 +422,17 @@ def _extract_closed_list_experience_skills(text: str) -> list[str]:
     return extracted_skills
 
 
-def _experience_entry_skills(item: str, skills: list[str]) -> list[str]:
-    """Return top-level and closed-list skills explicitly present in one entry."""
+def extract_experience_skills_from_text(
+    text: str,
+    known_skills: list[str] | None = None,
+) -> list[str]:
+    """Return known and closed-list skills explicitly present in experience text."""
+    item = str(text)
+    skills = list(known_skills) if isinstance(known_skills, list) else []
     entry_skills = [
         skill
         for skill in skills
+        if isinstance(skill, str)
         if re.search(rf"\b{re.escape(skill)}\b", item, flags=re.IGNORECASE)
     ]
     for skill in _extract_closed_list_experience_skills(item):
@@ -459,7 +465,7 @@ def _extract_experience(sections: dict[str, list[str]], skills: list[str]) -> li
         experience_items = role_blocks if len(role_blocks) == role_heading_count else [" ".join(experience_items)]
 
     for index, item in enumerate(experience_items, start=1):
-        entry_skills = _experience_entry_skills(item, skills)
+        entry_skills = extract_experience_skills_from_text(item, skills)
         experience.append(
             {
                 "id": f"exp-{index}",

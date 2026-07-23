@@ -8,7 +8,10 @@ Unit tests for deterministic extracted CV text parsing.
 import json
 from pathlib import Path
 
-from engine.candidate_profile_text_parser import parse_candidate_profile_text
+from engine.candidate_profile_text_parser import (
+    extract_experience_skills_from_text,
+    parse_candidate_profile_text,
+)
 
 
 SAMPLE_PROFILE_PATH = Path("samples/sample_profile_admin.json")
@@ -723,6 +726,56 @@ Utilized Advanced Excel for weekly reporting.
     assert "Advanced Excel" in experience_skills
     assert "Microsoft Office" not in experience_skills
     assert "MS Office" not in experience_skills
+
+
+def test_public_helper_extracts_microsoft_office_and_html_css() -> None:
+    result = extract_experience_skills_from_text(
+        "Taught Microsoft Office, HTML/CSS fundamentals, and exam technique to students."
+    )
+
+    assert "Microsoft Office" in result
+    assert "HTML/CSS" in result
+
+
+def test_public_helper_blocks_negated_crm() -> None:
+    result = extract_experience_skills_from_text(
+        "Managed client databases in Excel from scratch \u2014 no CRM provided."
+    )
+
+    assert "Excel" in result
+    assert "CRM" not in result
+
+
+def test_public_helper_blocks_negated_salesforce() -> None:
+    result = extract_experience_skills_from_text(
+        "Worked without Salesforce access; tracked leads manually."
+    )
+
+    assert "Salesforce" not in result
+
+
+def test_public_helper_does_not_infer_ms_office_from_advanced_excel() -> None:
+    result = extract_experience_skills_from_text(
+        "Utilized Advanced Excel for weekly reporting."
+    )
+
+    assert "Advanced Excel" in result
+    assert "Microsoft Office" not in result
+    assert "MS Office" not in result
+
+
+def test_public_helper_includes_known_skills_only_when_explicitly_present() -> None:
+    known_skills = ["Communication", "Scheduling"]
+    original_known_skills = list(known_skills)
+
+    result = extract_experience_skills_from_text(
+        "Handled scheduling and office coordination.",
+        known_skills,
+    )
+
+    assert "Scheduling" in result
+    assert "Communication" not in result
+    assert known_skills == original_known_skills
 
 
 def test_real_pdf_professional_experience_extracts_entries() -> None:

@@ -16,7 +16,10 @@ except ModuleNotFoundError:  # Keep helper imports testable when streamlit is un
     st = None
 
 from models.job_description import JobDescription
-from engine.candidate_profile_text_parser import parse_candidate_profile_text
+from engine.candidate_profile_text_parser import (
+    extract_experience_skills_from_text,
+    parse_candidate_profile_text,
+)
 from engine.job_description_text_parser import parse_job_description_text
 from engine.resume_text_extractor import extract_resume_text
 from engine.section_evidence_trace import build_section_evidence_trace
@@ -751,7 +754,11 @@ def _ensure_candidate_review_state(profile: dict) -> None:
         _initialize_review_state_from_profile(profile, signature)
 
 
-def _build_reviewed_experience(lines: list[str], original_entries: list) -> list[dict]:
+def _build_reviewed_experience(
+    lines: list[str],
+    original_entries: list,
+    reviewed_top_level_skills: list[str],
+) -> list[dict]:
     """Build reviewed experience entries while preserving IDs by line order."""
     reviewed_experience: list[dict] = []
     for index, line in enumerate(lines):
@@ -762,7 +769,10 @@ def _build_reviewed_experience(lines: list[str], original_entries: list) -> list
             {
                 "id": original_id or f"exp-{index + 1}",
                 "text": line,
-                "skills": [],
+                "skills": extract_experience_skills_from_text(
+                    line,
+                    reviewed_top_level_skills,
+                ),
             }
         )
     return reviewed_experience
@@ -783,12 +793,14 @@ def _build_reviewed_candidate_profile() -> dict:
         st.session_state["reviewed_candidate_profile"]
         or parsed_profile
     )
+    reviewed_skills = _review_lines(st.session_state["review_skills"])
     reviewed = {
         "name": _normalize_review_line(st.session_state["review_name"]),
-        "skills": _review_lines(st.session_state["review_skills"]),
+        "skills": reviewed_skills,
         "experience": _build_reviewed_experience(
             _review_lines(st.session_state["review_experience"]),
             original_profile.get("experience", []),
+            reviewed_skills,
         ),
         "projects": _review_lines(st.session_state["review_projects"]),
         "certifications": _review_lines(st.session_state["review_certifications"]),

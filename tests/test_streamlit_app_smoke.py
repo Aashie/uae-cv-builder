@@ -57,6 +57,23 @@ def test_get_default_job_values_includes_expected_skill_strings() -> None:
     assert "Communication" in values["soft_skills"]
 
 
+def test_build_reviewed_experience_recomputes_nested_skills() -> None:
+    result = app._build_reviewed_experience(
+        [
+            "Taught Microsoft Office, HTML/CSS fundamentals, and exam technique.",
+            "Handled scheduling and office coordination.",
+            "Managed client databases in Excel; no CRM provided.",
+        ],
+        [{"id": "exp-7"}, {"id": "exp-8"}, {"id": "exp-9"}],
+        ["Scheduling"],
+    )
+
+    assert result[0]["skills"] == ["Microsoft Office", "HTML/CSS"]
+    assert result[1]["skills"] == ["Scheduling"]
+    assert "Excel" in result[2]["skills"]
+    assert "CRM" not in result[2]["skills"]
+
+
 def test_missing_sample_profile_file_raises_clear_error(monkeypatch) -> None:
     missing_path = Path("missing_profile.json")
     monkeypatch.setattr(app, "SAMPLE_PROFILE_PATH", missing_path)
