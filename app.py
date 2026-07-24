@@ -365,8 +365,11 @@ def _render_resume_preview(final_resume: dict) -> None:
     )
 
     with summary_tab:
-        summary = final_resume.get("professional_summary", "")
-        st.write(summary if summary else "No content available for this section.")
+        summary = str(final_resume.get("professional_summary", "") or "").strip()
+        if summary:
+            st.write(summary)
+        else:
+            st.caption("No professional summary available.")
 
     with skills_tab:
         skills = final_resume.get("skills", {})
@@ -376,21 +379,33 @@ def _render_resume_preview(final_resume: dict) -> None:
             "Tools": skills.get("tools", []),
             "Domain": skills.get("domain", []),
         }
-        if any(visible_groups.values()):
-            for label, items in visible_groups.items():
+        populated_groups = {
+            label: items for label, items in visible_groups.items() if items
+        }
+        if populated_groups:
+            for label, items in populated_groups.items():
                 _render_tags(label, items, "gray", "")
         else:
-            st.write("No content available for this section.")
+            st.caption("No skills available for this section.")
 
     with experience_tab:
         bullets = final_resume.get("experience_bullets", [])
-        if bullets:
-            for bullet in bullets:
-                text = bullet.get("text", "") if isinstance(bullet, dict) else str(bullet)
-                if text:
-                    st.markdown(f"- {text}")
+        visible_bullets = []
+        for bullet in bullets:
+            if isinstance(bullet, dict):
+                text = bullet.get("text", "")
+            elif isinstance(bullet, str):
+                text = bullet
+            else:
+                text = ""
+            text = str(text or "").strip()
+            if text:
+                visible_bullets.append(text)
+        if visible_bullets:
+            for text in visible_bullets:
+                st.markdown(f"- {text}")
         else:
-            st.write("No content available for this section.")
+            st.caption("No experience highlights available.")
 
 
 def _render_docx_download(final_resume: dict, validation: dict) -> None:

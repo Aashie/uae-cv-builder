@@ -12,6 +12,35 @@ import pytest
 import app
 
 
+class _PreviewTab:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+
+def _capture_resume_preview(monkeypatch, final_resume: dict) -> dict[str, list[str]]:
+    calls = {"markdown": [], "write": [], "caption": []}
+
+    def capture_markdown(body: str, unsafe_allow_html: bool = False) -> None:
+        calls["markdown"].append(body)
+
+    def capture_write(body) -> None:
+        calls["write"].append(str(body))
+
+    def capture_caption(body: str) -> None:
+        calls["caption"].append(str(body))
+
+    monkeypatch.setattr(app.st, "tabs", lambda labels: [_PreviewTab() for _ in labels])
+    monkeypatch.setattr(app.st, "markdown", capture_markdown)
+    monkeypatch.setattr(app.st, "write", capture_write)
+    monkeypatch.setattr(app.st, "caption", capture_caption)
+
+    app._render_resume_preview(final_resume)
+    return calls
+
+
 def test_app_exposes_helper_functions() -> None:
     assert hasattr(app, "parse_skill_lines")
     assert hasattr(app, "get_sample_profile")
@@ -88,6 +117,122 @@ def test_render_tags_separates_badge_html(monkeypatch) -> None:
     rendered_tags = markdown_calls[1][0]
     assert "</span> <span" in rendered_tags
     assert "ExcelMeta Ads" not in rendered_tags
+
+
+def test_resume_preview_renders_summary_text_when_present(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "Evidence-backed sales support summary.",
+            "skills": {},
+            "experience_bullets": [],
+        },
+    )
+
+    assert "Evidence-backed sales support summary." in calls["write"]
+    assert "No professional summary available." not in calls["caption"]
+
+
+def test_resume_preview_shows_summary_empty_state_when_empty(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "   ",
+            "skills": {},
+            "experience_bullets": [],
+        },
+    )
+
+    assert "No professional summary available." in calls["caption"]
+
+
+def test_resume_preview_skips_empty_skill_group_labels(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "Summary.",
+            "skills": {
+                "technical": [],
+                "soft": [],
+                "tools": ["Excel"],
+                "domain": ["Microsoft Office"],
+            },
+            "experience_bullets": [],
+        },
+    )
+
+    rendered_html = "\n".join(calls["markdown"])
+    assert "Technical" not in rendered_html
+    assert "Soft Skills" not in rendered_html
+
+
+def test_resume_preview_renders_only_populated_skill_groups(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "Summary.",
+            "skills": {
+                "technical": [],
+                "soft": [],
+                "tools": ["Excel", "Meta Ads"],
+                "domain": ["HTML/CSS"],
+            },
+            "experience_bullets": [],
+        },
+    )
+
+    rendered_html = "\n".join(calls["markdown"])
+    assert "Tools" in rendered_html
+    assert "Excel" in rendered_html
+    assert "Meta Ads" in rendered_html
+    assert "Domain" in rendered_html
+    assert "HTML/CSS" in rendered_html
+
+
+def test_resume_preview_renders_experience_bullet_text_when_present(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "Summary.",
+            "skills": {},
+            "experience_bullets": [
+                {"text": "Tracked sales data in Excel.", "source_evidence_id": "EXP001"}
+            ],
+        },
+    )
+
+    assert "- Tracked sales data in Excel." in calls["markdown"]
+    assert "No experience highlights available." not in calls["caption"]
+
+
+def test_resume_preview_shows_experience_empty_state_without_visible_bullets(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "Summary.",
+            "skills": {},
+            "experience_bullets": [{"text": "  "}, "", None],
+        },
+    )
+
+    assert "No experience highlights available." in calls["caption"]
+
+
+def test_resume_preview_supports_dict_and_string_bullets(monkeypatch) -> None:
+    calls = _capture_resume_preview(
+        monkeypatch,
+        {
+            "professional_summary": "Summary.",
+            "skills": {},
+            "experience_bullets": [
+                {"text": "Prepared client reports.", "source_evidence_id": "EXP001"},
+                "Maintained social media schedules.",
+            ],
+        },
+    )
+
+    assert "- Prepared client reports." in calls["markdown"]
+    assert "- Maintained social media schedules." in calls["markdown"]
 
 
 def _valid_docx_analysis_result() -> dict:
