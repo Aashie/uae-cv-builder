@@ -26,7 +26,12 @@ REQUIRED_SKILL_KEYS = {
 }
 
 GENERIC_MATCH_SCORE_SUMMARY_PATTERN = re.compile(
-    r"^Professional with a \d+(\.\d+)?% match score for opportunities\.?$"
+    r"^Professional with a \d+(\.\d+)?% match score for\s+opportunities\.?$"
+)
+
+GENERIC_MATCH_SCORE_SUMMARY_ERROR = (
+    "Section 'professional_summary' contains a generic match-score placeholder "
+    "or is missing target role context."
 )
 
 
@@ -93,9 +98,7 @@ def validate_final_resume(final_resume: dict) -> dict:
         elif GENERIC_MATCH_SCORE_SUMMARY_PATTERN.fullmatch(
             professional_summary.strip()
         ):
-            errors.append(
-                "Section 'professional_summary' contains only the generic match-score placeholder."
-            )
+            errors.append(GENERIC_MATCH_SCORE_SUMMARY_ERROR)
 
     if "skills" in final_resume and not isinstance(final_resume["skills"], dict):
         errors.append("Section 'skills' must be a dictionary.")

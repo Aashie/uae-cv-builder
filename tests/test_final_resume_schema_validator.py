@@ -178,7 +178,8 @@ def test_generic_match_score_summary_fails() -> None:
 
     assert result["is_valid"] is False
     assert (
-        "Section 'professional_summary' contains only the generic match-score placeholder."
+        "Section 'professional_summary' contains a generic match-score placeholder "
+        "or is missing target role context."
         in result["errors"]
     )
 
@@ -193,9 +194,65 @@ def test_generic_match_score_summary_without_period_fails() -> None:
 
     assert result["is_valid"] is False
     assert (
-        "Section 'professional_summary' contains only the generic match-score placeholder."
+        "Section 'professional_summary' contains a generic match-score placeholder "
+        "or is missing target role context."
         in result["errors"]
     )
+
+
+def test_empty_title_generic_match_score_summary_with_double_space_fails() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Professional with a 28.57% match score for  opportunities."
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert any(
+        "generic match-score placeholder" in error
+        and "missing target role context" in error
+        for error in result["errors"]
+    )
+
+
+def test_empty_title_zero_match_score_summary_with_double_space_fails() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Professional with a 0% match score for  opportunities."
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is False
+    assert any(
+        "generic match-score placeholder" in error
+        and "missing target role context" in error
+        for error in result["errors"]
+    )
+
+
+def test_match_score_summary_with_target_role_passes() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Professional with a 75% match score for Sales Executive opportunities."
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is True
+
+
+def test_normal_candidate_safe_summary_passes() -> None:
+    final_resume = valid_final_resume()
+    final_resume["professional_summary"] = (
+        "Sales-focused professional with UAE client communication experience "
+        "and Microsoft Office skills."
+    )
+
+    result = validate_final_resume(final_resume)
+
+    assert result["is_valid"] is True
 
 
 def test_legitimate_summary_with_percentage_passes() -> None:
