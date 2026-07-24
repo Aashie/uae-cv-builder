@@ -70,6 +70,11 @@ TOOLS_KEYWORDS = {
     "autocad",
 }
 
+DISPLAY_LABEL_OVERRIDES = {
+    "excellent knowledge of ms office": "Microsoft Office",
+    "proficiency in english": "Proficiency in English",
+}
+
 
 def _empty_skills_section() -> dict:
     """Return an empty skills section schema."""
@@ -115,10 +120,23 @@ def _format_word(word: str) -> str:
     return normalized_word.capitalize()
 
 
+def _format_slash_delimited_word(word: str) -> str:
+    """Return slash-delimited text while preserving acronym segments."""
+    if "/" not in word:
+        return _format_word(word)
+    return "/".join(_format_word(part) for part in word.split("/"))
+
+
 def _format_skill(skill: str) -> str:
     """Normalize spacing and readable casing while preserving known acronyms."""
     normalized_skill = re.sub(r"\s+", " ", skill.strip())
-    return " ".join(_format_word(word) for word in normalized_skill.split(" "))
+    override = DISPLAY_LABEL_OVERRIDES.get(_normalize_key(normalized_skill))
+    if override:
+        return override
+    return " ".join(
+        _format_slash_delimited_word(word)
+        for word in normalized_skill.split(" ")
+    )
 
 
 def _dedupe_skills(skills: list) -> list[str]:
@@ -129,11 +147,12 @@ def _dedupe_skills(skills: list) -> list[str]:
     for skill in skills:
         if not isinstance(skill, str):
             continue
-        normalized_key = _normalize_key(skill)
+        formatted_skill = _format_skill(skill)
+        normalized_key = _normalize_key(formatted_skill)
         if not normalized_key or normalized_key in seen_keys:
             continue
         seen_keys.add(normalized_key)
-        deduped_skills.append(_format_skill(skill))
+        deduped_skills.append(formatted_skill)
 
     return deduped_skills
 

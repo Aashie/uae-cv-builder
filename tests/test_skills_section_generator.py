@@ -120,6 +120,32 @@ def test_does_not_invent_missing_job_skills() -> None:
     assert "Python" not in combined_skills
 
 
+def test_label_cleanup_does_not_insert_missing_job_skills() -> None:
+    result = generator.generate_skills_section(
+        {},
+        {
+            "missing_skills": [
+                "Excellent knowledge of MS Office",
+                "Proficiency in English",
+            ],
+        },
+        {"strongest_skills": ["Excel"]},
+    )
+
+    combined_skills = sum(
+        (
+            result["skills_section"]["technical"],
+            result["skills_section"]["soft"],
+            result["skills_section"]["tools"],
+            result["skills_section"]["domain"],
+        ),
+        [],
+    )
+    assert "Microsoft Office" not in combined_skills
+    assert "Proficiency in English" not in combined_skills
+    assert combined_skills == ["Excel"]
+
+
 def test_ignores_unsupported_input_fields() -> None:
     result = generator.generate_skills_section(
         {"job_title": "Python Developer"},
@@ -181,6 +207,61 @@ def test_preserves_common_acronyms() -> None:
     assert "SQL" in combined_skills
     assert "UAE" in combined_skills
     assert "HTML" in combined_skills
+
+
+def test_preserves_slash_delimited_acronyms() -> None:
+    result = generator.generate_skills_section({"key_skills": ["html/css"]}, {}, {})
+
+    combined_skills = (
+        result["skills_section"]["technical"]
+        + result["skills_section"]["tools"]
+        + result["skills_section"]["domain"]
+    )
+    assert "HTML/CSS" in combined_skills
+    assert "Html/css" not in combined_skills
+
+
+def test_ms_office_jd_phrase_maps_to_microsoft_office_label() -> None:
+    result = generator.generate_skills_section(
+        {},
+        {
+            "matched_skills": [
+                "Excellent knowledge of MS Office",
+                "Excellent Knowledge Of MS Office",
+            ]
+        },
+        {},
+    )
+
+    combined_skills = (
+        result["skills_section"]["technical"]
+        + result["skills_section"]["tools"]
+        + result["skills_section"]["domain"]
+    )
+    assert combined_skills.count("Microsoft Office") == 1
+    assert result["skills_section"]["matched_skills"] == ["Microsoft Office"]
+
+
+def test_english_proficiency_phrase_only_gets_casing_cleanup() -> None:
+    result = generator.generate_skills_section(
+        {},
+        {
+            "matched_skills": [
+                "Proficiency in English",
+                "Proficiency In English",
+            ]
+        },
+        {},
+    )
+
+    combined_skills = (
+        result["skills_section"]["technical"]
+        + result["skills_section"]["tools"]
+        + result["skills_section"]["domain"]
+    )
+    assert combined_skills.count("Proficiency in English") == 1
+    assert "English proficiency" not in combined_skills
+    assert "English proficiency" not in result["skills_section"]["matched_skills"]
 
 
 def test_categorizes_technical_skills_from_reference_data() -> None:

@@ -274,7 +274,7 @@ def _render_tags(title: str, values: list[str], style: str, empty_message: str) 
     """Render skill values as pill tags."""
     st.markdown(f'<div class="section-label">{title}</div>', unsafe_allow_html=True)
     if values:
-        tags = "".join(_badge(str(value), style) for value in values)
+        tags = " ".join(_badge(str(value), style) for value in values)
         st.markdown(tags, unsafe_allow_html=True)
     else:
         st.caption(empty_message)

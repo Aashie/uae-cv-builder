@@ -74,6 +74,22 @@ def test_build_reviewed_experience_recomputes_nested_skills() -> None:
     assert "CRM" not in result[2]["skills"]
 
 
+def test_render_tags_separates_badge_html(monkeypatch) -> None:
+    markdown_calls = []
+
+    def capture_markdown(body: str, unsafe_allow_html: bool = False) -> None:
+        markdown_calls.append((body, unsafe_allow_html))
+
+    monkeypatch.setattr(app.st, "markdown", capture_markdown)
+    monkeypatch.setattr(app.st, "caption", lambda message: None)
+
+    app._render_tags("Tools", ["Excel", "Meta Ads"], "gray", "")
+
+    rendered_tags = markdown_calls[1][0]
+    assert "</span> <span" in rendered_tags
+    assert "ExcelMeta Ads" not in rendered_tags
+
+
 def _valid_docx_analysis_result() -> dict:
     return {
         "status": "success",
